@@ -21,6 +21,7 @@ class CheckLicenceEntity {
     var expiredAt: Date? = null
     var isExpired: Boolean = false
     var isInactive: Boolean = false
+    var isCanceled: Boolean = false
     var isTrial: Boolean = false
     var subscriptionId: String? = null
     var checkoutType: String? = null
@@ -31,49 +32,57 @@ class CheckLicenceEntity {
     var licenceInternalKey: String? = null
 
     companion object {
+        private const val DATE_PATTERN = "yyyy-MM-dd'T'HH:mm:ss"
+
+        /** optString devolve "null" para JSONObject.NULL; aqui null/ausente vira "". */
+        private fun JSONObject.optStringOrEmpty(name: String): String {
+            return if (isNull(name)) "" else optString(name)
+        }
+
         fun fromJson(jsonStr: String): CheckLicenceEntity? {
             return try {
                 val json = JSONObject(jsonStr)
-                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+                val sdf = SimpleDateFormat(DATE_PATTERN, Locale.US)
 
                 val entity = CheckLicenceEntity()
-                entity.id = json.optString("id")
-                entity.uid = json.optString("uid")
-                entity.deviceUid = json.optString("deviceUid")
-                entity.deviceSerialNumber = json.optString("deviceSerialNumber")
-                entity.userUid = json.optString("userUid")
-                entity.productId = json.optString("productId")
-                entity.productName = json.optString("productName")
-                entity.productDescription = json.optString("productDescription")
-                entity.integrationLibId = json.optString("integrationLibId")
-                entity.integrationLibName = json.optString("integrationLibName")
-                entity.checkoutSessionId = json.optString("checkoutSessionId")
-                entity.licenceKey = json.optString("licenceKey")
-                entity.licenceEncrypt = json.optString("licenceEncrypt")
+                entity.id = json.optStringOrEmpty("id")
+                entity.uid = json.optStringOrEmpty("uid")
+                entity.deviceUid = json.optStringOrEmpty("deviceUid")
+                entity.deviceSerialNumber = json.optStringOrEmpty("deviceSerialNumber")
+                entity.userUid = json.optStringOrEmpty("userUid")
+                entity.productId = json.optStringOrEmpty("productId")
+                entity.productName = json.optStringOrEmpty("productName")
+                entity.productDescription = json.optStringOrEmpty("productDescription")
+                entity.integrationLibId = json.optStringOrEmpty("integrationLibId")
+                entity.integrationLibName = json.optStringOrEmpty("integrationLibName")
+                entity.checkoutSessionId = json.optStringOrEmpty("checkoutSessionId")
+                entity.licenceKey = json.optStringOrEmpty("licenceKey")
+                entity.licenceEncrypt = json.optStringOrEmpty("licenceEncrypt")
                 entity.isExpired = json.optBoolean("isExpired")
                 entity.isInactive = json.optBoolean("isInactive")
+                entity.isCanceled = json.optBoolean("isCanceled")
                 entity.isTrial = json.optBoolean("isTrial")
-                entity.subscriptionId = json.optString("subscriptionId")
-                entity.checkoutType = json.optString("checkoutType")
-                entity.databaseVersion = json.optString("databaseVersion")
-                entity.licenceInternalKey = json.optString("licenceInternalKey")
+                entity.subscriptionId = json.optStringOrEmpty("subscriptionId")
+                entity.checkoutType = json.optStringOrEmpty("checkoutType")
+                entity.databaseVersion = json.optStringOrEmpty("databaseVersion")
+                entity.licenceInternalKey = json.optStringOrEmpty("licenceInternalKey")
 
-                val expiredAtStr = json.optString("expiredAt")
+                val expiredAtStr = json.optStringOrEmpty("expiredAt")
                 if (expiredAtStr.isNotEmpty()) {
                     entity.expiredAt = sdf.parse(expiredAtStr)
                 }
 
-                val createdAtStr = json.optString("createdAt")
+                val createdAtStr = json.optStringOrEmpty("createdAt")
                 if (createdAtStr.isNotEmpty()) {
-                    entity.createdAt = sdf.parse(createdAtStr)
+                    entity.createdAt = try { sdf.parse(createdAtStr) } catch (e: Exception) { null }
                 }
 
-                val updatedAtStr = json.optString("updatedAt")
+                val updatedAtStr = json.optStringOrEmpty("updatedAt")
                 if (updatedAtStr.isNotEmpty()) {
-                    entity.updatedAt = sdf.parse(updatedAtStr)
+                    entity.updatedAt = try { sdf.parse(updatedAtStr) } catch (e: Exception) { null }
                 }
 
-                val savedLocalStr = json.optString("savedLocalDatabaseAt")
+                val savedLocalStr = json.optStringOrEmpty("savedLocalDatabaseAt")
                 if (savedLocalStr.isNotEmpty()) {
                     entity.savedLocalDatabaseAt = sdf.parse(savedLocalStr)
                 }
@@ -104,17 +113,18 @@ class CheckLicenceEntity {
             json.put("licenceEncrypt", licenceEncrypt)
             json.put("isExpired", isExpired)
             json.put("isInactive", isInactive)
+            json.put("isCanceled", isCanceled)
             json.put("isTrial", isTrial)
             json.put("subscriptionId", subscriptionId)
             json.put("checkoutType", checkoutType)
             json.put("databaseVersion", databaseVersion)
             json.put("licenceInternalKey", licenceInternalKey)
 
-            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-            if (expiredAt != null) json.put("expiredAt", sdf.format(expiredAt))
-            if (createdAt != null) json.put("createdAt", sdf.format(createdAt))
-            if (updatedAt != null) json.put("updatedAt", sdf.format(updatedAt))
-            if (savedLocalDatabaseAt != null) json.put("savedLocalDatabaseAt", sdf.format(savedLocalDatabaseAt))
+            val sdf = SimpleDateFormat(DATE_PATTERN, Locale.US)
+            expiredAt?.let { json.put("expiredAt", sdf.format(it)) }
+            createdAt?.let { json.put("createdAt", sdf.format(it)) }
+            updatedAt?.let { json.put("updatedAt", sdf.format(it)) }
+            savedLocalDatabaseAt?.let { json.put("savedLocalDatabaseAt", sdf.format(it)) }
 
             json.toString()
         } catch (e: Exception) {

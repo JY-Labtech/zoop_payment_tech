@@ -82,6 +82,7 @@ android {
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+        test.java.srcDirs += 'src/test/kotlin'
     }
 
     testOptions {
@@ -120,5 +121,6 @@ dependencies {
 
     // Test
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.mockito:mockito-core:5.0.0")
+    // org.json do android.jar é stub em teste JVM
+    testImplementation("org.json:json:20240303")
 }

@@ -1,6 +1,6 @@
 name: zoop_payment_tech
 description: "Plugin Flutter para integração com o SDK Zoop SmartPOS. Permite realizar pagamentos, PIX, login e cancelamentos através de terminais SmartPOS da Zoop."
-version: 1.0.0
+version: 1.1.0
 homepage: https://github.com/JY-Labtech/zoop_payment_tech
 
 environment:

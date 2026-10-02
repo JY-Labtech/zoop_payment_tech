@@ -23,11 +23,13 @@ Plugin Flutter para integração com o SDK Zoop SmartPOS. Este plugin abstrai to
 - [Funcionalidades](#funcionalidades)
 - [Requisitos](#requisitos)
 - [Configuração](#configuração)
+- [Licença do Plugin (validação)](#licença-do-plugin-validação)
 - [Guia de Uso](#guia-de-uso)
 - [Exemplos Práticos](#exemplos-práticos)
 - [Tratamento de Erros](#tratamento-de-erros)
 - [Boas Práticas](#boas-práticas)
 - [Estrutura do Projeto](#estrutura-do-projeto)
+- [Testes](#testes)
 - [Licença](#licença)
 
 ## 🎯 Sobre o Plugin
@@ -83,13 +85,15 @@ O plugin utiliza uma arquitetura em camadas:
 
 ### Fluxo de Validação de Licença
 
-Antes de qualquer operação de pagamento, o plugin valida automaticamente a licença:
+Antes de **cada** operação (inicialização, login, pagamentos, cancelamento etc.), o plugin valida automaticamente a licença:
 
 1. **Validação Local**: Verifica se há uma licença válida salva no dispositivo
-2. **Validação Remota**: Se não houver cache válido, consulta a API de validação
+2. **Validação Remota**: Se não houver cache válido, consulta sempre o servidor oficial da JY Labtech (`https://portal-api.jylabtech.com.br/pos-payments/licence/check`), fora da thread principal
 3. **Armazenamento Seguro**: Salva a licença de forma criptografada no dispositivo
-4. **Cache**: Mantém cache por 7 dias para evitar requisições desnecessárias
-5. **Bloqueio**: Se inválida, bloqueia todas as operações de pagamento
+4. **Cache offline**: A licença salva vale até a data de vencimento (`expiredAt`), por no máximo 7 dias sem nova consulta
+5. **Bloqueio**: Se a licença for inválida, vencida, suspensa ou cancelada, a operação é recusada com o erro `LICENCE_ERROR` e o SDK da Zoop não é chamado
+
+Detalhes em [Licença do Plugin (validação)](#licença-do-plugin-validação).
 
 ### Sistema de Callbacks
 
@@ -142,8 +146,8 @@ Para utilizar o plugin, você precisará de:
 
 2. **Licenças**: Chaves de licença válidas para o plugin
 
-   - `licenceKey`: Chave pública de licença
-   - `licenceInternalKey`: Chave interna de licença (pode ser URL da API ou base64)
+   - `licenceKey`: sua chave de licença, adquirida no portal [https://portal.jylabtech.com.br](https://portal.jylabtech.com.br)
+   - `licenceInternalKey` (opcional): endereço da API de validação. Se omitido, o plugin usa o servidor oficial da JY Labtech
 
 3. **Terminal Físico**: Um terminal SmartPOS compatível conectado ao dispositivo Android
 
@@ -157,10 +161,7 @@ Adicione o plugin ao seu `pubspec.yaml`:
 dependencies:
   flutter:
     sdk: flutter
-  zoop_payment_tech:
-    path: ../zoop_payment_tech # Ajuste o caminho conforme necessário
-    # ou use a versão do pub.dev quando disponível:
-    # zoop_payment_tech: ^0.0.1
+  zoop_payment_tech: ^1.1.0
 ```
 
 Execute:
@@ -255,25 +256,27 @@ export GITHUB_PAT=sua_personal_access_token
 
 ### 3. Configurar Licenças
 
-O plugin requer licenças válidas para funcionar. Configure no `android/local.properties`:
+O plugin requer uma licença válida para funcionar. A chave é lida no momento do build a partir do `android/local.properties` **do seu aplicativo**:
 
 ```properties
-licenceKey=sua_chave_de_licenca_publica
-licenceInternalKey=aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBpLTU3NzQ2NDIzNTQwOC5zb3V0aGFtZXJpY2EtZWFzdDEucnVuLmFwcC9wb3MtcGF5bWVudHMvbGljZW5jZS9jaGVjay9pbnZvaWNl
+licenceKey=SUA_CHAVE_DE_LICENCA
+# opcional: se omitido, o plugin usa o servidor oficial da JY Labtech
+licenceInternalKey=aHR0cHM6Ly9wb3J0YWwtYXBpLmp5bGFidGVjaC5jb20uYnIvcG9zLXBheW1lbnRzL2xpY2VuY2UvY2hlY2s=
 ```
 
-**Alternativamente**, você pode configurar via variáveis de ambiente:
+**Alternativamente**, via variáveis de ambiente (têm prioridade sobre o `local.properties`):
 
 ```bash
-export LICENCE_KEY=sua_chave_de_licenca
-export LICENCE_INTERNAL_KEY=aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBpLTU3NzQ2NDIzNTQwOC5zb3V0aGFtZXJpY2EtZWFzdDEucnVuLmFwcC9wb3MtcGF5bWVudHMvbGljZW5jZS9jaGVjay9pbnZvaWNl
+export LICENCE_KEY=SUA_CHAVE_DE_LICENCA
+export LICENCE_INTERNAL_KEY=aHR0cHM6Ly9wb3J0YWwtYXBpLmp5bGFidGVjaC5jb20uYnIvcG9zLXBheW1lbnRzL2xpY2VuY2UvY2hlY2s=  # opcional
 ```
 
 **Importante**:
 
-- Sem as licenças configuradas, o plugin bloqueará todas as operações de pagamento
-- A `licenceInternalKey` pode ser uma URL completa da API ou uma string base64 codificada
-- As licenças são validadas automaticamente antes de cada operação
+- Sem o `licenceKey` configurado, o plugin bloqueia todas as operações com o erro `LICENCE_ERROR`
+- O `licenceInternalKey` é **opcional**. O plugin sempre valida no servidor oficial da JY Labtech (`https://portal-api.jylabtech.com.br/pos-payments/licence/check`); o valor acima é o base64 desse endereço (também é aceita a URL em texto puro). Qualquer valor que não aponte para o servidor oficial (outro host, `http` sem TLS, base64 inválido ou o endereço antigo do Cloud Run) é ignorado e o servidor oficial é usado no lugar
+- Como os valores entram no `BuildConfig`, após alterá-los faça um build limpo (`flutter clean`) do aplicativo
+- Veja a seção [Licença do Plugin (validação)](#licença-do-plugin-validação) para planos, limites, erros e solução de problemas
 
 ### 4. Configurar Flavor do Terminal
 
@@ -342,6 +345,56 @@ Adicione as permissões necessárias no `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
+
+## 🔑 Licença do Plugin (validação)
+
+### Onde adquirir
+
+As licenças são adquiridas e gerenciadas no portal **[https://portal.jylabtech.com.br](https://portal.jylabtech.com.br)** (o login é o mesmo e-mail/senha do portal anterior). O produto é a **"Licença plugin de pagamento"**, que vale para qualquer plugin de pagamento da JY Labtech.
+
+- **Chaves existentes continuam válidas**: quem já possui uma chave não precisa trocá-la. Chaves novas no formato `JYL-...` também funcionam.
+- **Plano `debug` (cortesia)**: concedido automaticamente ao se cadastrar no portal; permite até 2 aparelhos por 365 dias, ideal para desenvolvimento e testes.
+- **Plano `mensal`**: cobrado por dispositivo.
+- **Limite por dispositivo**: cada aparelho que valida a licença ocupa uma vaga. Aparelhos podem ser desativados pelo portal para liberar vagas (um aparelho desativado deixa de ser aceito).
+
+### Como configurar
+
+Configure o `licenceKey` conforme [3. Configurar Licenças](#3-configurar-licenças). O `licenceInternalKey` é opcional; se quiser informá-lo, o valor é:
+
+```
+aHR0cHM6Ly9wb3J0YWwtYXBpLmp5bGFidGVjaC5jb20uYnIvcG9zLXBheW1lbnRzL2xpY2VuY2UvY2hlY2s=
+```
+
+> **A partir da 1.1.0:** a validação usa sempre o servidor oficial da JY Labtech. Valores do `licenceInternalKey` que apontem para outro endereço, inclusive o antigo (que começa com `aHR0cHM6Ly9wb3MtcGF5bWVudHMtYXBp...`), são ignorados. Não é preciso trocar a chave de licença.
+
+### Como funciona a validação
+
+- A validação é feita automaticamente antes de cada operação: `initialize`, `login`, `checkZoopKey`, `creditPayment`, `pixPayment`, `voidTransaction` e `selectVoidTransaction`. Ficam de fora apenas `getPlatformVersion` e `cancelOperation` (cancelar uma operação em andamento nunca é bloqueado).
+- A consulta de rede roda fora da thread principal, com timeout de 15 s para conexão e 15 s para leitura.
+- O plugin envia ao servidor a chave (`Authorization: Bearer licence:<licenceKey>`) e a identificação do aparelho (ANDROID_ID, número de série e modelo).
+- Só é aceita uma licença vigente: a resposta do servidor precisa ter `expiredAt` no futuro e não estar marcada como vencida (`isExpired`), inativa/suspensa (`isInactive`) ou cancelada (`isCanceled`). Uma resposta 200 com licença vencida, sem `expiredAt` ou com JSON inválido também bloqueia.
+- Se aprovada, a licença é guardada de forma criptografada no aparelho e reutilizada offline até o vencimento (`expiredAt`), por no máximo **7 dias** sem nova consulta. O cache é descartado se for de outra chave, se a data em que foi salvo estiver no futuro (relógio adulterado) ou se tiver sido validado em outro servidor. Depois disso, o aparelho precisa de internet para validar novamente.
+- Se a licença for inválida, vencida, suspensa ou cancelada, a operação é bloqueada: o nativo responde `PlatformException` com código `LICENCE_ERROR`, o callback `onError` recebe `"Sua licença não foi ativada. <motivo>"` (por exemplo, a `message` devolvida pelo servidor) e o método do `Payment` retorna `false`. O SDK da Zoop não é chamado. O motivo também aparece no Logcat (tag `ZoopPaymentTechPlugin`).
+
+### Erros de licença
+
+| HTTP | Situação | O que fazer |
+| ---- | -------- | ----------- |
+| 400 | Aparelho sem identificador estável | Verifique se o app consegue ler o ANDROID_ID / número de série do aparelho |
+| 403 | Chave não enviada | Configure `licenceKey` e refaça o build |
+| 404 | Licença não encontrada | Confira a chave no portal (sem espaços ou quebras de linha) |
+| 412 | Limite de aparelhos atingido ou aparelho desativado | Desative aparelhos não usados ou contrate mais dispositivos no portal |
+| 428 | Licença vencida, suspensa ou cancelada | Renove ou regularize a licença no portal |
+| 429 | Muitas requisições (rate limit) | Aguarde alguns instantes e tente novamente |
+
+Todas as respostas de erro trazem um JSON `{"message": "..."}` com a descrição, repassada ao `onError`. Sem corpo JSON, a mensagem é `Erro ao validar licença (HTTP <código>)`.
+
+### Solução de problemas
+
+- **"Licença não configurada"**: `licenceKey` vazio. Confira o `android/local.properties` do app (ou as variáveis de ambiente) e faça `flutter clean` antes de compilar.
+- **Trocou a chave e nada mudou**: os valores são gravados no `BuildConfig`; faça um build limpo. Ao trocar a chave, o cache local é descartado e a licença é consultada novamente.
+- **Funciona offline e depois para**: o cache local expira em 7 dias (ou no vencimento da licença). Conecte o aparelho à internet e repita a operação.
+- **Erro de conexão/timeout**: o aparelho precisa acessar `https://portal-api.jylabtech.com.br`. Verifique rede, proxy ou firewall.
 
 ## 📖 Guia de Uso
 
@@ -504,9 +557,7 @@ await payment.voidTransaction();
 // Exiba a lista para o usuário selecionar
 
 // Quando o usuário selecionar uma transação:
-await payment.selectVoidTransaction(
-  transactionKey: 'chave_da_transacao_selecionada',
-);
+await payment.selectVoidTransaction('chave_da_transacao_selecionada');
 
 // onSuccess será chamado quando o cancelamento for concluído
 ```
@@ -1123,14 +1174,14 @@ class MyZoopHandler implements IZoopHandler {
 
 #### 1. Erro de Licença
 
+Os métodos do `Payment` não lançam exceções: retornam `false` em caso de falha e o motivo chega pelo callback `onError`. Quando a licença é inválida, vencida, suspensa ou cancelada, a operação não é executada e `onError` recebe `"Sua licença não foi ativada. <motivo>"` (veja [Erros de licença](#erros-de-licença)).
+
 ```dart
-try {
-  await payment.creditPayment(amount: 5000);
-} on PlatformException catch (e) {
-  if (e.code == 'LICENCE_ERROR') {
-    // Licença inválida ou não configurada
-    print('Erro de licença: ${e.message}');
-    // Mostrar mensagem ao usuário ou solicitar nova licença
+@override
+Future<void> onError(String message) async {
+  if (message.contains('licença')) {
+    // Licença inválida, vencida ou não configurada
+    // Verifique a licença em https://portal.jylabtech.com.br
   }
 }
 ```
@@ -1153,13 +1204,10 @@ Future<void> onError(String message) async {
 #### 3. Erro de Conexão
 
 ```dart
-try {
-  await payment.login();
-} on PlatformException catch (e) {
-  if (e.message?.contains('network') == true) {
-    // Problema de conexão
-    // Verificar conectividade e tentar novamente
-  }
+final ok = await payment.login();
+if (!ok) {
+  // Falha na operação (o motivo chega em onError)
+  // Verificar conectividade e tentar novamente
 }
 ```
 
@@ -1173,7 +1221,7 @@ class ErrorHandler {
 
     if (error.contains('licença')) {
       title = 'Erro de Licença';
-      message = 'Sua licença não está ativa. Entre em contato com o suporte.';
+      message = 'Sua licença não está ativa. Verifique-a em https://portal.jylabtech.com.br.';
     } else if (error.contains('session')) {
       title = 'Sessão Expirada';
       message = 'Por favor, faça login novamente.';
@@ -1300,11 +1348,14 @@ zoop_payment_tech/
 │   │   │       └── br/com/jylabtech/zoop_payment_tech/
 │   │   │           ├── ZoopPaymentTechPlugin.kt    # Plugin principal
 │   │   │           └── licence/                     # Sistema de licenças
-│   │   │               ├── CheckLicenceTech.kt
+│   │   │               ├── CheckLicenceTech.kt      # Cache criptografado + fluxo (Android)
 │   │   │               ├── CheckLicenceEntity.kt
-│   │   │               ├── LicenceProvider.kt
+│   │   │               ├── LicenceConfig.kt         # URL oficial e resolveLicenceUrl
+│   │   │               ├── LicenceRules.kt          # Regras puras de validade/cache/HTTP
+│   │   │               ├── LicenceValidator.kt      # Fluxo cache -> servidor (puro)
+│   │   │               ├── LicenceProvider.kt       # HTTP
 │   │   │               └── LicenceResult.kt
-│   │   └── test/
+│   │   └── test/kotlin/...licence/       # Testes JVM da licença
 │   └── gradle/wrapper/
 ├── lib/
 │   ├── src/
@@ -1326,10 +1377,28 @@ zoop_payment_tech/
 │   │   ├── zoop_payment_tech_core.dart
 │   │   └── zoop_payment_tech.dart
 │   └── zoop_payment_tech.dart       # Arquivo principal de exportação
+├── test/                             # Testes Dart (flutter test)
 ├── example/                          # Projeto de exemplo
 ├── pubspec.yaml
 └── README.md
 ```
+
+## 🧪 Testes
+
+Testes Dart (canal mockado, incluindo o bloqueio por `LICENCE_ERROR`):
+
+```bash
+flutter test
+```
+
+Testes JVM da validação de licença no nativo (`android/src/test/kotlin`), pelo projeto de exemplo:
+
+```bash
+cd example/android
+./gradlew :zoop_payment_tech:testPaxA910DebugUnitTest
+```
+
+Esse comando precisa das credenciais do GitHub Packages da Zoop (`GITHUB_USER`/`GITHUB_PAT`), porque o módulo depende do SDK. As classes testadas (`LicenceConfig`, `LicenceRules`, `LicenceValidator`, `CheckLicenceEntity`, `LicenceResult`) não dependem do Android nem do SDK Zoop e também podem ser compiladas e testadas num projeto Kotlin/JVM comum com `org.json:json` e JUnit 4.
 
 ## 🔐 Licença
 

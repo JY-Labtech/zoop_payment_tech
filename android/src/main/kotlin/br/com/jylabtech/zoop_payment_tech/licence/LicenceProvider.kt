@@ -4,101 +4,61 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
-import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
 
-class LicenceProvider(private val context: Context) {
+/**
+ * Transporte HTTP da validação de licença. Bloqueante: chamar fora da main thread.
+ */
+class LicenceProvider(private val context: Context) : LicenceHttpClient {
 
-    suspend fun checkLicence(urlString: String, licenceKey: String): LicenceResult {
-        return withContext(Dispatchers.IO) {
-            val licenceResult = LicenceResult()
-            licenceResult.method = "licence"
-
-            var connection: HttpURLConnection? = null
-            try {
-                val deviceId = getAndroidId()
-                val deviceUid = getSerialNumber()
-                val deviceLocalId = getDeviceUUID()
-                val deviceName = Build.MODEL
-
-                val url = URL(urlString)
-                connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-
-                if (licenceKey.isNotEmpty()) {
-                    connection.setRequestProperty("Authorization", "Bearer licence:$licenceKey")
-                }
-
-                connection.doOutput = true
-
-                val body = JSONObject().apply {
-                    put("deviceId", deviceId)
-                    put("deviceUid", deviceUid)
-                    put("deviceLocalId", deviceLocalId)
-                    put("deviceName", deviceName)
-                }
-
-                val os: OutputStream = connection.outputStream
-                os.write(body.toString().toByteArray(Charsets.UTF_8))
-                os.flush()
-                os.close()
-
-                val responseCode = connection.responseCode
-
-                if (responseCode == HttpURLConnection.HTTP_OK) {
-                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                    val responseStr = StringBuilder()
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        responseStr.append(line)
-                    }
-                    reader.close()
-
-                    licenceResult.result = 0
-                    licenceResult.licenceEntity = CheckLicenceEntity.fromJson(responseStr.toString())
-                } else {
-                    licenceResult.result = 999999
-                    licenceResult.errorMessage = handleErrors(connection)
-                }
-
-                licenceResult
-            } catch (e: Exception) {
-                licenceResult.result = 999999
-                licenceResult.errorMessage = e.message
-                licenceResult
-            } finally {
-                connection?.disconnect()
+    override fun post(url: String, licenceKey: String): LicenceHttpResponse {
+        var connection: HttpURLConnection? = null
+        try {
+            val body = JSONObject().apply {
+                put("deviceId", getAndroidId())
+                put("deviceUid", getSerialNumber())
+                put("deviceLocalId", getDeviceUUID())
+                put("deviceName", Build.MODEL)
             }
+
+            connection = URL(url).openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.connectTimeout = LicenceConfig.CONNECT_TIMEOUT_MS
+            connection.readTimeout = LicenceConfig.READ_TIMEOUT_MS
+            connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Content-Type", "application/json")
+            if (licenceKey.isNotEmpty()) {
+                connection.setRequestProperty("Authorization", "Bearer licence:$licenceKey")
+            }
+            connection.doOutput = true
+
+            val os: OutputStream = connection.outputStream
+            os.write(body.toString().toByteArray(Charsets.UTF_8))
+            os.flush()
+            os.close()
+
+            val responseCode = connection.responseCode
+            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+            return LicenceHttpResponse(responseCode, readBody(stream))
+        } finally {
+            connection?.disconnect()
         }
     }
 
-    private fun handleErrors(connection: HttpURLConnection): String {
-        var errorMessage = "Erro interno"
-        try {
-            val reader = BufferedReader(InputStreamReader(connection.errorStream))
-            val responseStr = StringBuilder()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                responseStr.append(line)
-            }
-            reader.close()
-
-            val json = JSONObject(responseStr.toString())
-            errorMessage = json.optString("message", errorMessage)
+    private fun readBody(stream: InputStream?): String? {
+        if (stream == null) return null
+        return try {
+            BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
         } catch (e: Exception) {
-            Log.d("LicenceProvider", "ExceptionMessageError: ${e.message}")
-            errorMessage = e.message ?: "Erro desconhecido"
+            null
         }
-        return errorMessage
     }
 
     @SuppressLint("HardwareIds")
@@ -125,4 +85,3 @@ class LicenceProvider(private val context: Context) {
         return UUID.randomUUID().toString()
     }
 }
-

@@ -6,230 +6,83 @@ import android.util.Base64
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import kotlinx.coroutines.runBlocking
-import java.nio.charset.StandardCharsets
-import java.util.Date
-import java.util.concurrent.TimeUnit
 
+/**
+ * Validação de licença no Android: liga o [LicenceValidator] (regras puras) ao cache
+ * criptografado (EncryptedSharedPreferences) e ao transporte HTTP ([LicenceProvider]).
+ *
+ * [validateLicence] é bloqueante quando precisa consultar o servidor: chamar fora da main thread.
+ */
 class CheckLicenceTech(private val context: Context) {
-
-    private val licenceProvider = LicenceProvider(context)
 
     companion object {
         private const val PREFS_NAME = "licence_prefs_encrypted"
         private const val KEY_JSON = "licence_entity"
+        private const val TAG = "CheckLicenceTech"
     }
+
+    private val validator = LicenceValidator(
+        store = EncryptedLicenceStore(),
+        httpClient = LicenceProvider(context),
+        base64Decoder = { Base64.decode(it, Base64.DEFAULT) }
+    )
 
     /**
-     * Valida a licença chamando a API e salva localmente se sucesso.
+     * Valida a licença: usa o cache offline se ainda for válido; senão valida no servidor oficial
+     * (a URL passa sempre por [LicenceConfig.resolveLicenceUrl]) e salva o cache em caso de sucesso.
      */
-    fun validateLicence(licenceKey: String, licenceInternalKey: String): LicenceResult {
-        val licenceResult = LicenceResult()
-        licenceResult.method = "licence"
-
+    fun validateLicence(licenceKey: String?, licenceInternalKey: String?): LicenceResult {
         return try {
-            val licenceDatabase = validateLicenceDatabase(licenceKey, licenceInternalKey)
-            if (licenceDatabase) {
-                licenceResult.result = 0
-                return licenceResult
-            }
-
-            val apiUrl = sanitizeUrl(licenceInternalKey)
-            val licence = runBlocking {
-                licenceProvider.checkLicence(apiUrl, licenceKey)
-            }
-
-            if (licence != null && licence.result == 0) {
-                val isValidLicence = validateLicenceServer(licence.licenceEntity)
-                if (isValidLicence && licence.licenceEntity != null) {
-                    val entity = licence.licenceEntity!!
-                    entity.licenceInternalKey = licenceInternalKey
-                    saveLicenceEncrypted(entity)
-                    licenceResult.result = 0
-                    licenceResult.licenceEntity = entity
-                } else {
-                    licenceResult.result = 999999
-                    licenceResult.errorMessage = "Licença inválida ou expirada"
-                }
-            } else {
-                licenceResult.result = licence?.result ?: 999999
-                licenceResult.errorMessage = licence?.errorMessage ?: "Erro ao validar licença"
-            }
-
-            licenceResult
+            validator.validate(licenceKey, licenceInternalKey)
         } catch (e: Exception) {
-            licenceResult.result = 999999
-            licenceResult.errorMessage = e.message
-            e.printStackTrace()
-            licenceResult
+            Log.e(TAG, "Erro ao validar licença", e)
+            val result = LicenceResult()
+            result.method = "licence"
+            result.result = LicenceRules.RESULT_ERROR
+            result.errorMessage = e.message ?: "Erro ao validar licença"
+            result
         }
     }
 
-    fun validateExistsLicence(): Boolean {
-        val now = Date()
-        return try {
-            val licenceDatabase = getLicenceEncrypted()
-            if (licenceDatabase != null) {
-                var aux = licenceDatabase.expiredAt?.after(now) == true
-
-                if (licenceDatabase.isExpired || licenceDatabase.isInactive) {
-                    aux = false
-                }
-
-                if (licenceDatabase.savedLocalDatabaseAt != null) {
-                    val diffInMillis = now.time - licenceDatabase.savedLocalDatabaseAt!!.time
-                    val diffInDays = TimeUnit.MILLISECONDS.toDays(diffInMillis)
-                    if (diffInDays > 7) {
-                        deleteLicenceDatabase()
-                        aux = false
-                    }
-                }
-
-                aux
-            } else {
-                false
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
-    }
-
-    private fun validateLicenceServer(entity: CheckLicenceEntity?): Boolean {
-        if (entity == null) return false
-
-        val now = Date()
-        var aux = entity.expiredAt?.after(now) == true
-
-        if (entity.isExpired || entity.isInactive) {
-            aux = false
-        }
-
-        return aux
-    }
-
-    private fun validateLicenceDatabase(licenceKey: String, licenceInternalKey: String): Boolean {
-        val now = Date()
-        return try {
-            val licenceDatabase = getLicenceEncrypted()
-            if (licenceDatabase != null) {
-                var aux = licenceDatabase.expiredAt?.after(now) == true
-
-                if (licenceDatabase.isExpired || licenceDatabase.isInactive) {
-                    aux = false
-                }
-
-                if (licenceDatabase.savedLocalDatabaseAt != null) {
-                    val diffInMillis = now.time - licenceDatabase.savedLocalDatabaseAt!!.time
-                    val diffInDays = TimeUnit.MILLISECONDS.toDays(diffInMillis)
-                    if (diffInDays > 7) {
-                        deleteLicenceDatabase()
-                        aux = false
-                    }
-                }
-
-                if (licenceDatabase.licenceEncrypt != licenceKey) {
-                    aux = false
-                }
-
-                if (licenceDatabase.licenceInternalKey != licenceInternalKey) {
-                    deleteLicenceDatabase()
-                    aux = false
-                }
-
-                aux
-            } else {
-                false
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
-    }
-
-    /**
-     * Salva a entidade de licença localmente de forma criptografada.
-     */
-    private fun saveLicenceEncrypted(entity: CheckLicenceEntity): Boolean {
-        return try {
-            entity.savedLocalDatabaseAt = Date()
-
+    private inner class EncryptedLicenceStore : LicenceStore {
+        private fun prefs(): SharedPreferences {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
 
-            val prefs: SharedPreferences = EncryptedSharedPreferences.create(
+            return EncryptedSharedPreferences.create(
                 context,
                 PREFS_NAME,
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
-
-            prefs.edit().putString(KEY_JSON, entity.toJson()).apply()
-            true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
         }
-    }
 
-    /**
-     * Recupera a licença salva localmente de forma criptografada.
-     */
-    private fun getLicenceEncrypted(): CheckLicenceEntity? {
-        return try {
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-
-            val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-                context,
-                PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-
-            val savedJson = prefs.getString(KEY_JSON, null)
-            if (savedJson != null) {
-                CheckLicenceEntity.fromJson(savedJson)
-            } else {
+        override fun load(): CheckLicenceEntity? {
+            return try {
+                val savedJson = prefs().getString(KEY_JSON, null)
+                if (savedJson != null) CheckLicenceEntity.fromJson(savedJson) else null
+            } catch (e: Exception) {
+                Log.e(TAG, "Erro ao ler licença salva", e)
                 null
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
         }
-    }
 
-    private fun deleteLicenceDatabase() {
-        try {
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-
-            val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-                context,
-                PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-
-            prefs.edit().remove(KEY_JSON).apply()
-        } catch (e: Exception) {
-            Log.e("CheckLicenceTech", "Erro ao deletar licença", e)
+        override fun save(entity: CheckLicenceEntity) {
+            try {
+                prefs().edit().putString(KEY_JSON, entity.toJson()).apply()
+            } catch (e: Exception) {
+                Log.e(TAG, "Erro ao salvar licença", e)
+            }
         }
-    }
 
-    private fun sanitizeUrl(data: String): String {
-        return if (data.contains("http")) {
-            data
-        } else {
-            val decodedBytes = Base64.decode(data, Base64.DEFAULT)
-            String(decodedBytes, StandardCharsets.UTF_8)
+        override fun delete() {
+            try {
+                prefs().edit().remove(KEY_JSON).apply()
+            } catch (e: Exception) {
+                Log.e(TAG, "Erro ao deletar licença", e)
+            }
         }
     }
 }
-
