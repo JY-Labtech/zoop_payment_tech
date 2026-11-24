@@ -160,7 +160,7 @@ Adicione o plugin ao seu `pubspec.yaml`:
 dependencies:
   flutter:
     sdk: flutter
-  zoop_payment_tech: ^1.1.0
+  zoop_payment_tech: ^1.2.0
 ```
 
 Execute:

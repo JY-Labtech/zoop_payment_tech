@@ -1,9 +1,8 @@
-## Não lançado
+## 1.2.0
 
 - Licença conforme o contrato do jylabtech_core (JYN-234): o cache offline vale por no máximo 72 horas (antes 7 dias) e só é usado quando o servidor não responde (sem internet, timeout, 408, 429, 5xx ou resposta ilegível).
 - A primeira operação depois de abrir o app consulta o servidor, e a licença é revalidada a cada 4 horas de uso. Após uma falha de rede, o plugin espera 5 minutos antes de tentar o servidor de novo.
 - Recusa do servidor (cliente bloqueado, licença vencida/cancelada/suspensa, não encontrada, aparelho desativado) apaga o cache e bloqueia na hora. Com `"reason":"customer_blocked"` a mensagem é "Cliente bloqueado. Entre em contato com a JY Labtech.".
-- O plugin não tem binário pré-compilado em `android/libs`: nada a regerar; o código Kotlin é compilado pelo app.
 
 ## 1.1.0
 
