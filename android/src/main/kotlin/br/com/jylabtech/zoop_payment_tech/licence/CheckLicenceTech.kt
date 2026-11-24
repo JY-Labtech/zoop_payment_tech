@@ -28,9 +28,13 @@ class CheckLicenceTech(private val context: Context) {
     )
 
     /**
-     * Valida a licença: usa o cache offline se ainda for válido; senão valida no servidor oficial
-     * (a URL passa sempre por [LicenceConfig.resolveLicenceUrl]) e salva o cache em caso de sucesso.
+     * Valida a licença conforme o contrato do jylabtech_core (ver [LicenceValidator]): a primeira
+     * validação desta instância consulta o servidor oficial (a URL passa sempre por
+     * [LicenceConfig.resolveLicenceUrl]); depois o cache vale sem rede e é revalidado a cada 4h.
+     * Recusa definitiva do servidor apaga o cache e bloqueia na hora; falha de rede/5xx usa o
+     * cache salvo há no máximo 72h. O estado online é desta instância (uma por engine do plugin).
      */
+    @Synchronized
     fun validateLicence(licenceKey: String?, licenceInternalKey: String?): LicenceResult {
         return try {
             validator.validate(licenceKey, licenceInternalKey)

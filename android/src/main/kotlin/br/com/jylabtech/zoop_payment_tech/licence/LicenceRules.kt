@@ -10,6 +10,10 @@ object LicenceRules {
     const val RESULT_SUCCESS = 0
     const val RESULT_ERROR = 999999
 
+    /** Motivo do core para cliente bloqueado/banido (bloqueio total imediato). */
+    const val REASON_CUSTOMER_BLOCKED = "customer_blocked"
+    const val CUSTOMER_BLOCKED_MESSAGE = "Cliente bloqueado. Entre em contato com a JY Labtech."
+
     /** Licença utilizável: vigente pela data e sem flags de vencida, inativa ou cancelada. */
     fun isLicenceUsable(entity: CheckLicenceEntity?, now: Date): Boolean {
         if (entity == null) return false
@@ -34,8 +38,8 @@ object LicenceRules {
 
     /**
      * O cache offline só vale se, ao mesmo tempo: a licença é utilizável, foi salvo há no máximo
-     * 7 dias, não está no futuro (tolerância de 5 min), pertence à chave atual e foi validado na
-     * mesma URL.
+     * 72h (última validação online bem-sucedida), não está no futuro (tolerância de 5 min),
+     * pertence à chave atual e foi validado na mesma URL.
      *
      * @param resolvedUrl URL efetiva (já passada por [LicenceConfig.resolveLicenceUrl]).
      * @param internalKeyIsOfficial true quando o `licenceInternalKey` atual aponta para o servidor
@@ -66,7 +70,30 @@ object LicenceRules {
     }
 
     /**
+     * Indica se uma resposta HTTP diferente de 200 é uma recusa definitiva do servidor (licença
+     * não encontrada, vencida, cancelada, suspensa, cliente bloqueado, aparelho desativado, limite
+     * de aparelhos, requisição inválida). 408, 429, 5xx e outros códigos são falha temporária
+     * (servidor fora do ar), que pode usar o cache offline.
+     */
+    fun isDefinitiveRejection(statusCode: Int): Boolean {
+        return statusCode in 400..499 && statusCode != 408 && statusCode != 429
+    }
+
+    /**
+     * Indica se é hora de consultar o servidor: sem cache, na primeira validação desta instância
+     * (abertura do app) ou quando a última consulta online tem [LicenceConfig.REVALIDATE_INTERVAL_MS]
+     * ou mais.
+     */
+    fun shouldRevalidate(cache: CheckLicenceEntity?, checkedOnlineInThisProcess: Boolean, now: Date?): Boolean {
+        if (cache == null || !checkedOnlineInThisProcess || now == null) return true
+        val savedAt = cache.savedLocalDatabaseAt ?: return true
+        return now.time - savedAt.time >= LicenceConfig.REVALIDATE_INTERVAL_MS
+    }
+
+    /**
      * Decide o resultado da chamada HTTP de validação. Somente 200 com licença utilizável é sucesso.
+     * Marca [LicenceResult.rejectedByServer] nas recusas definitivas (ver [isDefinitiveRejection] e
+     * 200 com licença lida mas inutilizável); corpo 200 ilegível (ex.: HTML de proxy) não é recusa.
      */
     fun evaluateServerResponse(statusCode: Int, body: String?, now: Date): LicenceResult {
         val result = LicenceResult()
@@ -80,21 +107,29 @@ object LicenceRules {
                 result.licenceEntity = entity
             } else {
                 result.errorMessage = unusableReason(entity, now)
+                // Corpo ilegível (ex.: página de erro de proxy) não é recusa da licença.
+                result.rejectedByServer = entity != null
             }
             return result
         }
 
+        result.rejectedByServer = isDefinitiveRejection(statusCode)
         result.errorMessage = errorMessageFromBody(statusCode, body)
         return result
     }
 
-    /** Extrai `message` do corpo de erro; sem corpo JSON, "Erro ao validar licença (HTTP <code>)". */
+    /**
+     * Extrai `message` do corpo de erro; sem corpo JSON, "Erro ao validar licença (HTTP <code>)".
+     * Com `"reason":"customer_blocked"` devolve [CUSTOMER_BLOCKED_MESSAGE].
+     */
     fun errorMessageFromBody(statusCode: Int, body: String?): String {
         val fallback = "Erro ao validar licença (HTTP $statusCode)"
         if (body.isNullOrBlank()) return fallback
         return try {
             val json = JSONObject(body)
-            if (json.isNull("message")) {
+            if (json.optString("reason", "") == REASON_CUSTOMER_BLOCKED) {
+                CUSTOMER_BLOCKED_MESSAGE
+            } else if (json.isNull("message")) {
                 fallback
             } else {
                 val message = json.optString("message").trim()

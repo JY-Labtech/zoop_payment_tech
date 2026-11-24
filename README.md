@@ -87,11 +87,10 @@ O plugin utiliza uma arquitetura em camadas:
 
 Antes de **cada** operação (inicialização, login, pagamentos, cancelamento etc.), o plugin valida automaticamente a licença:
 
-1. **Validação Local**: Verifica se há uma licença válida salva no dispositivo
-2. **Validação Remota**: Se não houver cache válido, consulta sempre o servidor oficial da JY Labtech (`https://portal-api.jylabtech.com.br/pos-payments/licence/check`), fora da thread principal
-3. **Armazenamento Seguro**: Salva a licença de forma criptografada no dispositivo
-4. **Cache offline**: A licença salva vale até a data de vencimento (`expiredAt`), por no máximo 7 dias sem nova consulta
-5. **Bloqueio**: Se a licença for inválida, vencida, suspensa ou cancelada, a operação é recusada com o erro `LICENCE_ERROR` e o SDK da Zoop não é chamado
+1. **Validação Remota**: A primeira operação depois de abrir o app sempre consulta o servidor oficial da JY Labtech (`https://portal-api.jylabtech.com.br/pos-payments/licence/check`), fora da thread principal; depois, a licença é consultada de novo a cada 4 horas de uso
+2. **Armazenamento Seguro**: Salva a licença de forma criptografada no dispositivo
+3. **Cache offline**: A licença salva só é usada quando o servidor não responde (sem internet, timeout ou erro 5xx), por no máximo 72 horas desde a última validação online e até a data de vencimento (`expiredAt`)
+4. **Bloqueio imediato**: Se o servidor recusar a licença (cliente bloqueado, licença vencida, suspensa ou cancelada, não encontrada, aparelho desativado), o cache é apagado e a operação é recusada com o erro `LICENCE_ERROR`; o SDK da Zoop não é chamado
 
 Detalhes em [Licença do Plugin (validação)](#licença-do-plugin-validação).
 
@@ -373,7 +372,9 @@ aHR0cHM6Ly9wb3J0YWwtYXBpLmp5bGFidGVjaC5jb20uYnIvcG9zLXBheW1lbnRzL2xpY2VuY2UvY2hl
 - A consulta de rede roda fora da thread principal, com timeout de 15 s para conexão e 15 s para leitura.
 - O plugin envia ao servidor a chave (`Authorization: Bearer licence:<licenceKey>`) e a identificação do aparelho (ANDROID_ID, número de série e modelo).
 - Só é aceita uma licença vigente: a resposta do servidor precisa ter `expiredAt` no futuro e não estar marcada como vencida (`isExpired`), inativa/suspensa (`isInactive`) ou cancelada (`isCanceled`). Uma resposta 200 com licença vencida, sem `expiredAt` ou com JSON inválido também bloqueia.
-- Se aprovada, a licença é guardada de forma criptografada no aparelho e reutilizada offline até o vencimento (`expiredAt`), por no máximo **7 dias** sem nova consulta. O cache é descartado se for de outra chave, se a data em que foi salvo estiver no futuro (relógio adulterado) ou se tiver sido validado em outro servidor. Depois disso, o aparelho precisa de internet para validar novamente.
+- **Revalidação**: a primeira operação depois de abrir o app sempre consulta o servidor; depois, a licença é consultada de novo a cada **4 horas** de uso.
+- **Bloqueio imediato**: se o servidor recusar a licença (cliente bloqueado no portal, licença vencida, cancelada ou suspensa, não encontrada, aparelho desativado ou limite de aparelhos), o cache é apagado e as operações passam a falhar com `LICENCE_ERROR` na hora.
+- **Cache offline**: se aprovada, a licença é guardada de forma criptografada no aparelho. Ela só é usada quando o servidor não responde (sem internet, timeout, 408, 429 ou erro 5xx) e por no máximo **72 horas** desde a última validação online, até o vencimento (`expiredAt`). Depois de uma falha de rede o plugin espera 5 minutos antes de tentar o servidor de novo. O cache é descartado se for de outra chave, se a data em que foi salvo estiver no futuro (relógio adulterado) ou se tiver sido validado em outro servidor. Sem internet e sem cache válido, as operações falham com `LICENCE_ERROR`.
 - Se a licença for inválida, vencida, suspensa ou cancelada, a operação é bloqueada: o nativo responde `PlatformException` com código `LICENCE_ERROR`, o callback `onError` recebe `"Sua licença não foi ativada. <motivo>"` (por exemplo, a `message` devolvida pelo servidor) e o método do `Payment` retorna `false`. O SDK da Zoop não é chamado. O motivo também aparece no Logcat (tag `ZoopPaymentTechPlugin`).
 
 ### Erros de licença
@@ -393,7 +394,7 @@ Todas as respostas de erro trazem um JSON `{"message": "..."}` com a descrição
 
 - **"Licença não configurada"**: `licenceKey` vazio. Confira o `android/local.properties` do app (ou as variáveis de ambiente) e faça `flutter clean` antes de compilar.
 - **Trocou a chave e nada mudou**: os valores são gravados no `BuildConfig`; faça um build limpo. Ao trocar a chave, o cache local é descartado e a licença é consultada novamente.
-- **Funciona offline e depois para**: o cache local expira em 7 dias (ou no vencimento da licença). Conecte o aparelho à internet e repita a operação.
+- **Funciona offline e depois para**: o cache local expira 72 horas após a última validação online (ou no vencimento da licença). Conecte o aparelho à internet e repita a operação.
 - **Erro de conexão/timeout**: o aparelho precisa acessar `https://portal-api.jylabtech.com.br`. Verifique rede, proxy ou firewall.
 
 ## 📖 Guia de Uso
@@ -1352,7 +1353,7 @@ zoop_payment_tech/
 │   │   │               ├── CheckLicenceEntity.kt
 │   │   │               ├── LicenceConfig.kt         # URL oficial e resolveLicenceUrl
 │   │   │               ├── LicenceRules.kt          # Regras puras de validade/cache/HTTP
-│   │   │               ├── LicenceValidator.kt      # Fluxo cache -> servidor (puro)
+│   │   │               ├── LicenceValidator.kt      # Fluxo servidor/cache (puro)
 │   │   │               ├── LicenceProvider.kt       # HTTP
 │   │   │               └── LicenceResult.kt
 │   │   └── test/kotlin/...licence/       # Testes JVM da licença

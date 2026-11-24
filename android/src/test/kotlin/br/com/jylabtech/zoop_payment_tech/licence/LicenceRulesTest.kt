@@ -15,6 +15,7 @@ class LicenceRulesTest {
 
     private val now = Date()
     private val core = LicenceConfig.LICENCE_CHECK_URL
+    private val HOUR_MS = 60L * 60 * 1000
 
     // ---------- isLicenceUsable ----------
 
@@ -196,6 +197,34 @@ class LicenceRulesTest {
     }
 
     @Test
+    fun refusalsAreDefinitiveAndOutagesAreNot() {
+        for (code in listOf(404, 412, 428, 403, 400)) {
+            assertTrue("HTTP $code", LicenceRules.evaluateServerResponse(code, """{"message":"x"}""", now).rejectedByServer)
+        }
+        for (code in listOf(408, 429, 500, 502, 503)) {
+            assertFalse("HTTP $code", LicenceRules.evaluateServerResponse(code, """{"message":"x"}""", now).rejectedByServer)
+        }
+        assertTrue(LicenceRules.evaluateServerResponse(200, LicenceTestData.coreJson(isCanceled = true), now).rejectedByServer)
+        assertTrue(LicenceRules.evaluateServerResponse(200, LicenceTestData.coreJson(expiredAt = "2020-01-01T00:00:00"), now).rejectedByServer)
+        assertTrue(LicenceRules.evaluateServerResponse(200, LicenceTestData.coreJson(expiredAt = null), now).rejectedByServer)
+        assertFalse(LicenceRules.evaluateServerResponse(200, LicenceTestData.coreJson(), now).rejectedByServer)
+        // corpo ilegível (proxy/captive portal) não é recusa da licença
+        assertFalse(LicenceRules.evaluateServerResponse(200, "<html>oops</html>", now).rejectedByServer)
+        assertFalse(LicenceRules.evaluateServerResponse(200, null, now).rejectedByServer)
+    }
+
+    @Test
+    fun customerBlockedReasonHasClearMessage() {
+        val r = LicenceRules.evaluateServerResponse(
+            428,
+            """{"message":"A data de expiração da licença é inválida. [-]","reason":"customer_blocked"}""",
+            now
+        )
+        assertTrue(r.rejectedByServer)
+        assertEquals("Cliente bloqueado. Entre em contato com a JY Labtech.", r.errorMessage)
+    }
+
+    @Test
     fun licenceResultStartsAsError() {
         assertEquals(LicenceRules.RESULT_ERROR, LicenceResult().result)
         assertFalse(LicenceResult().isSuccess)
@@ -228,8 +257,38 @@ class LicenceRulesTest {
     }
 
     @Test
-    fun cache_olderThan7Days() {
-        assertFalse(usable(cache(savedAt = Date(now.time - 8 * DAY_MS))))
+    fun cache_olderThan72Hours() {
+        assertFalse(usable(cache(savedAt = Date(now.time - 72 * HOUR_MS - 1000))))
+    }
+
+    @Test
+    fun cache_exactly72HoursIsStillValid() {
+        assertTrue(usable(cache(savedAt = Date(now.time - 72 * HOUR_MS))))
+    }
+
+    @Test
+    fun cache_ofFourDaysIsNoLongerValid() {
+        assertFalse(usable(cache(savedAt = Date(now.time - 4 * DAY_MS))))
+    }
+
+    @Test
+    fun shouldRevalidateOnFirstCheckOfProcessAndAfterInterval() {
+        val c = cache(savedAt = Date(now.time - 10 * 60 * 1000))
+        assertTrue(LicenceRules.shouldRevalidate(c, false, now))
+        assertFalse(LicenceRules.shouldRevalidate(c, true, now))
+        assertTrue(LicenceRules.shouldRevalidate(null, true, now))
+        c.savedLocalDatabaseAt = Date(now.time - LicenceConfig.REVALIDATE_INTERVAL_MS)
+        assertTrue(LicenceRules.shouldRevalidate(c, true, now))
+    }
+
+    @Test
+    fun definitiveRejectionCodes() {
+        for (code in listOf(400, 401, 402, 403, 404, 409, 410, 412, 423, 428)) {
+            assertTrue("HTTP $code", LicenceRules.isDefinitiveRejection(code))
+        }
+        for (code in listOf(200, 301, 408, 429, 500, 502, 503, 504)) {
+            assertFalse("HTTP $code", LicenceRules.isDefinitiveRejection(code))
+        }
     }
 
     @Test
