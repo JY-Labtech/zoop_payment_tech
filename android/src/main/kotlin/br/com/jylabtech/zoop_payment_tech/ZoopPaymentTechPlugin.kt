@@ -98,7 +98,7 @@ class ZoopPaymentTechPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 return
             }
 
-            // Gate por operação: valida a licença (cache válido ou servidor) fora da main thread
+            // Gate por operação: valida a licença (servidor/cache, ver LicenceValidator) fora da main thread
             // e só então executa a operação na main thread. Licença inválida => LICENCE_ERROR e
             // o SDK da Zoop não é chamado.
             licenceExecutor.execute {

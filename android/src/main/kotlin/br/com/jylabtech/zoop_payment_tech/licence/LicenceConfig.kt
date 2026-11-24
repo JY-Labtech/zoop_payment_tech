@@ -18,8 +18,17 @@ object LicenceConfig {
     const val CONNECT_TIMEOUT_MS = 15_000
     const val READ_TIMEOUT_MS = 15_000
 
-    /** Validade máxima do cache offline. */
-    const val CACHE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
+    /**
+     * Validade máxima do cache offline sem nova consulta bem-sucedida ao servidor (contrato de
+     * licenças do jylabtech_core: no máximo 72h; igual ao TTL do token assinado).
+     */
+    const val CACHE_MAX_AGE_MS = 72L * 60 * 60 * 1000
+
+    /** Com cache válido, consulta o servidor de novo depois deste intervalo (em uso). */
+    const val REVALIDATE_INTERVAL_MS = 4L * 60 * 60 * 1000
+
+    /** Depois de uma falha de rede, espera este tempo antes de tentar o servidor de novo (usa o cache). */
+    const val RETRY_AFTER_FAILURE_MS = 5L * 60 * 1000
 
     /** Tolerância para `savedLocalDatabaseAt` no futuro (relógio do aparelho). */
     const val CLOCK_SKEW_TOLERANCE_MS = 5L * 60 * 1000
