@@ -40,11 +40,16 @@ class LicenceValidatorTest {
         }
     }
 
-    private val now = Date()
+    private var now = Date()
     private val core = LicenceConfig.LICENCE_CHECK_URL
+    private val hour = 60L * 60 * 1000
 
     private fun validator(store: FakeStore, http: FakeHttp) =
         LicenceValidator(store, http, { Base64.getDecoder().decode(it) }, { now })
+
+    private fun advance(millis: Long) {
+        now = Date(now.time + millis)
+    }
 
     private fun ok() = LicenceHttpResponse(200, LicenceTestData.coreJson())
 
@@ -69,17 +74,146 @@ class LicenceValidatorTest {
     }
 
     @Test
-    fun validCache_noNetwork() {
+    fun firstCheckOfProcessGoesOnlineEvenWithValidCache() {
         val store = FakeStore(validCache())
-        val http = FakeHttp { throw AssertionError("não deveria chamar a rede") }
+        val http = FakeHttp { ok() }
         val r = validator(store, http).validate(KEY, CORE_B64)
         assertTrue(r.isSuccess)
-        assertTrue(http.urls.isEmpty())
+        assertEquals(1, http.urls.size)
+        assertEquals(LicenceTestData.fmt(now), LicenceTestData.fmt(store.entity!!.savedLocalDatabaseAt!!))
+    }
+
+    @Test
+    fun validCacheSkipsNetworkAfterOnlineCheckUntilRevalidationInterval() {
+        val store = FakeStore()
+        val http = FakeHttp { ok() }
+        val v = validator(store, http)
+        assertTrue(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(1, http.urls.size)
+
+        advance(hour)
+        assertTrue(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(1, http.urls.size)
+
+        advance(LicenceConfig.REVALIDATE_INTERVAL_MS)
+        assertTrue(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(2, http.urls.size)
+    }
+
+    @Test
+    fun customerBlockedClearsCacheAndBlocksImmediately() {
+        val store = FakeStore()
+        var response = ok()
+        val http = FakeHttp { response }
+        val v = validator(store, http)
+        v.validate(KEY, CORE_B64)
+        advance(LicenceConfig.REVALIDATE_INTERVAL_MS)
+        response = LicenceHttpResponse(
+            428,
+            """{"message":"A data de expiração da licença é inválida. [-]","reason":"customer_blocked"}"""
+        )
+
+        val r = v.validate(KEY, CORE_B64)
+        assertFalse(r.isSuccess)
+        assertTrue(r.rejectedByServer)
+        assertEquals(LicenceRules.CUSTOMER_BLOCKED_MESSAGE, r.errorMessage)
+        assertNull(store.entity)
+        // sem cache: a próxima operação também consulta o servidor e continua bloqueada
+        assertFalse(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(3, http.urls.size)
+    }
+
+    @Test
+    fun everyDefinitiveRefusalClearsValidCache() {
+        for (code in listOf(404, 412, 428, 403, 400)) {
+            val store = FakeStore(validCache())
+            val http = FakeHttp { LicenceHttpResponse(code, """{"message":"recusada"}""") }
+            val r = validator(store, http).validate(KEY, CORE_B64)
+            assertFalse("HTTP $code", r.isSuccess)
+            assertEquals("HTTP $code", "recusada", r.errorMessage)
+            assertNull("HTTP $code", store.entity)
+        }
+    }
+
+    @Test
+    fun online200CanceledClearsValidCache() {
+        val store = FakeStore(validCache())
+        val http = FakeHttp { LicenceHttpResponse(200, LicenceTestData.coreJson(isCanceled = true)) }
+        assertFalse(validator(store, http).validate(KEY, CORE_B64).isSuccess)
+        assertNull(store.entity)
+    }
+
+    @Test
+    fun outageUsesCacheUpTo72Hours() {
+        val store = FakeStore()
+        var fail = false
+        val http = FakeHttp { if (fail) throw IOException("sem internet") else ok() }
+        val v = validator(store, http)
+        v.validate(KEY, CORE_B64)
+        fail = true
+
+        advance(71 * hour)
+        assertTrue(v.validate(KEY, CORE_B64).isSuccess)
+        assertNotNull(store.entity)
+
+        advance(hour + 1000)
+        val r = v.validate(KEY, CORE_B64)
+        assertFalse(r.isSuccess)
+        assertTrue(r.errorMessage!!.contains("sem internet"))
+        assertNull(store.entity)
+    }
+
+    @Test
+    fun serverErrorsUseCache() {
+        for (code in listOf(500, 502, 503, 408, 429)) {
+            val store = FakeStore(validCache())
+            val http = FakeHttp { LicenceHttpResponse(code, """{"message":"fora do ar"}""") }
+            val r = validator(store, http).validate(KEY, CORE_B64)
+            assertTrue("HTTP $code", r.isSuccess)
+            assertNotNull("HTTP $code", store.entity)
+        }
+    }
+
+    @Test
+    fun unreadable200UsesCache() {
+        val store = FakeStore(validCache())
+        val http = FakeHttp { LicenceHttpResponse(200, "<html>captive portal</html>") }
+        assertTrue(validator(store, http).validate(KEY, CORE_B64).isSuccess)
+        assertNotNull(store.entity)
+    }
+
+    @Test
+    fun afterOutageWaitsBeforeRetryingServer() {
+        val store = FakeStore(validCache())
+        var response: () -> LicenceHttpResponse = { throw IOException("sem internet") }
+        val http = FakeHttp { response() }
+        val v = validator(store, http)
+        assertTrue(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(1, http.urls.size)
+
+        advance(60 * 1000)
+        assertTrue(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(1, http.urls.size)
+
+        advance(LicenceConfig.RETRY_AFTER_FAILURE_MS)
+        response = { LicenceHttpResponse(428, """{"message":"Licença vencida"}""") }
+        assertFalse(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(2, http.urls.size)
+        assertNull(store.entity)
+    }
+
+    @Test
+    fun outageWithoutCacheBlocksAndKeepsTrying() {
+        val http = FakeHttp { throw IOException("sem internet") }
+        val v = validator(FakeStore(), http)
+        assertFalse(v.validate(KEY, CORE_B64).isSuccess)
+        assertFalse(v.validate(KEY, CORE_B64).isSuccess)
+        assertEquals(2, http.urls.size)
     }
 
     @Test
     fun staleCache_isDeletedAndRevalidatedOnline() {
-        val store = FakeStore(validCache(savedAt = Date(now.time - 8 * DAY_MS)))
+        val store = FakeStore(validCache(savedAt = Date(now.time - 4 * DAY_MS)))
         val http = FakeHttp { ok() }
         val r = validator(store, http).validate(KEY, CORE_B64)
         assertTrue(r.isSuccess)
@@ -90,7 +224,7 @@ class LicenceValidatorTest {
 
     @Test
     fun staleCache_andServerRejects_isErrorAndCacheGone() {
-        val store = FakeStore(validCache(savedAt = Date(now.time - 8 * DAY_MS)))
+        val store = FakeStore(validCache(savedAt = Date(now.time - 4 * DAY_MS)))
         val http = FakeHttp { LicenceHttpResponse(428, """{"message":"Licença vencida"}""") }
         val r = validator(store, http).validate(KEY, CORE_B64)
         assertFalse(r.isSuccess)
@@ -159,6 +293,7 @@ class LicenceValidatorTest {
         val r = validator(store, http).validate("other-key", CORE_B64)
         assertFalse(r.isSuccess)
         assertEquals("Licença não encontrada", r.errorMessage)
-        assertEquals(1, store.deletes)
+        assertTrue(store.deletes >= 1)
+        assertNull(store.entity)
     }
 }
