@@ -13,6 +13,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // O plugin usa core library desugaring: o app também precisa habilitar
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {

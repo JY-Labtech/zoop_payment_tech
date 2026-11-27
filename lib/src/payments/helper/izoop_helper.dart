@@ -40,8 +40,9 @@ class IZoopHelper {
 
         case 'onVoidTransactionList':
           final transactions = call.arguments['transactions'] as List<dynamic>? ?? [];
+          // O StandardMethodCodec entrega Map<Object?, Object?>: converte cada item.
           final transactionList = transactions
-              .map((e) => e as Map<String, dynamic>)
+              .map((e) => Map<String, dynamic>.from(e as Map))
               .toList();
           await iZoopHandler.onVoidTransactionList(transactionList);
           break;

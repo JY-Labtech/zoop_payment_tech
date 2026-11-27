@@ -1,10 +1,11 @@
 import 'package:flutter/services.dart';
+import 'package:zoop_payment_tech/src/constants/zoop_constants.dart';
 import 'package:zoop_payment_tech/src/interface/handler/izoop_handler.dart';
 
 import 'payments/payment.dart';
 
 class ZoopPaymentTechCore {
-  static const channelName = "zoop_payment_tech";
+  static const channelName = CHANNEL_NAME;
   final MethodChannel _channel;
   Payment? _payment;
 

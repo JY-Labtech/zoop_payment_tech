@@ -29,13 +29,19 @@ doc/api/
 .flutter-plugins-dependencies
 
 # --- Exclusões extras do pacote publicado (pub.dev) ---
-# Arquivos locais com caminhos da máquina e/ou chaves de licença
+# Segredos e arquivos locais com caminhos da máquina / credenciais (ex.: GITHUB_PAT)
 **/local.properties
 **/key.properties
 **/*.jks
 **/*.keystore
+example/Chaves/
 **/.DS_Store
-# Caches do Gradle/IDE
+# Documentação interna e dumps de memória do Gradle
+doc/
+*.hprof
+**/*.hprof
+# Caches do Gradle/IDE e saídas de build
+**/build/
 **/.gradle/
 **/.idea/
 **/.cxx/

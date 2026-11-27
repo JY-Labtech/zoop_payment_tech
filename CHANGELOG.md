@@ -1,3 +1,20 @@
+## 2.0.0
+
+- **BREAKING:** removidas a validação de licença e a cobrança. O plugin não faz mais nenhuma chamada ao servidor da JY Labtech e as operações vão direto ao SDK Zoop. Removidos:
+  - as chaves `licenceKey` e `licenceInternalKey` (lidas do `local.properties`) e as variáveis de ambiente `LICENCE_KEY`/`LICENCE_INTERNAL_KEY`, junto com os campos `BuildConfig.LICENCE_KEY`/`BuildConfig.LICENCE_INTERNAL_KEY` (o `buildConfig` do módulo foi desligado);
+  - a constante Dart `licenceCheck` e a biblioteca `src/licence/` (`licence.dart`, `licence_constants.dart`). `CHANNEL_NAME` e `USER_REFERENCE` continuam exportados, agora em `src/constants/zoop_constants.dart`;
+  - o erro `LICENCE_ERROR` e a mensagem `onError("Sua licença não foi ativada. ...")`;
+  - o gate por operação no nativo e as classes `CheckLicenceTech`, `CheckLicenceEntity`, `LicenceConfig`, `LicenceRules`, `LicenceValidator`, `LicenceProvider` e `LicenceResult`, com o cache criptografado no aparelho;
+  - a dependência `androidx.security:security-crypto` e a dependência de teste `org.json:json`.
+- Projeto open source sob a licença MIT.
+- README reescrito: requisitos, configuração das credenciais do GitHub Packages da Zoop (`GITHUB_USER`/`GITHUB_PAT` via `~/.gradle/gradle.properties`, `-P` ou variáveis de ambiente), flavors, desugaring, referência completa da API, exemplos por operação, erros e guia de migração.
+- Corrigido `onVoidTransactionList`: os itens chegavam do canal como `Map<Object?, Object?>` e a conversão para `Map<String, dynamic>` falhava, gerando `onError("Erro ao processar callback: ...")` em vez da lista de transações.
+- Nativo: todo callback enviado ao Dart (`onSuccess`, `onError`, `onMessage`, `onLoading`, `onQRCode`, `onToken`, `onVoidTransactionList`) passa a ser entregue na main thread. Os callbacks do SDK Zoop podem chegar em threads de fundo, e o `MethodChannel` só pode ser usado na main thread.
+- Nativo: removido do login o mapa de credenciais montado e nunca usado (a API Dart não muda).
+- Nativo: o roteamento do canal saiu para `ZoopMethodDispatcher` (sem dependência do SDK), com testes JVM de todos os métodos; os testes de licença foram apagados. Testes Dart reescritos para cobrir todos os métodos, argumentos, retorno `false` em erro e todos os callbacks.
+- Example: habilitado `isCoreLibraryDesugaringEnabled`, exigido porque o plugin usa core library desugaring.
+- pubspec: descrição em inglês, `repository`, `issue_tracker` e `topics`. `.pubignore` passa a excluir também `doc/`, `*.hprof`, `build/` e `example/Chaves/`.
+
 ## 1.2.0
 
 - Licença conforme o contrato do jylabtech_core (JYN-234): o cache offline vale por no máximo 72 horas (antes 7 dias) e só é usado quando o servidor não responde (sem internet, timeout, 408, 429, 5xx ou resposta ilegível).

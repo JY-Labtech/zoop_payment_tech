@@ -1,5 +1,5 @@
 group = "br.com.jylabtech.zoop_payment_tech"
-version = "1.0"
+version = "2.0.0"
 
 buildscript {
     repositories {
@@ -34,10 +34,6 @@ android {
     namespace = "br.com.jylabtech.zoop_payment_tech"
 
     compileSdk = 34
-    
-    buildFeatures {
-        buildConfig = true
-    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -51,19 +47,6 @@ android {
 
     defaultConfig {
         minSdk = 23
-        
-        // Licença - pode ser configurada via local.properties ou variáveis de ambiente
-        def localProps = new Properties()
-        def localPropertiesFile = rootProject.file("local.properties")
-        if (localPropertiesFile.exists()) {
-            localProps.load(new FileInputStream(localPropertiesFile))
-        }
-        
-        def licenceKey = System.getenv("LICENCE_KEY") ?: localProps.getProperty("licenceKey") ?: ""
-        def licenceInternalKey = System.getenv("LICENCE_INTERNAL_KEY") ?: localProps.getProperty("licenceInternalKey") ?: ""
-        
-        buildConfigField "String", "LICENCE_KEY", "\"${licenceKey}\""
-        buildConfigField "String", "LICENCE_INTERNAL_KEY", "\"${licenceInternalKey}\""
     }
 
     flavorDimensions += "terminal"
@@ -109,9 +92,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
 
-    // AndroidX Security
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
-
     // AndroidX
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
@@ -121,6 +101,4 @@ dependencies {
 
     // Test
     testImplementation("junit:junit:4.13.2")
-    // org.json do android.jar é stub em teste JVM
-    testImplementation("org.json:json:20240303")
 }

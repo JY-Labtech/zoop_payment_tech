@@ -1,199 +1,117 @@
 # zoop_payment_tech
 
+> Unofficial, open source (MIT) Flutter plugin for the Zoop SmartPOS Android SDK: credit payments with installments, PIX, terminal activation and void on PAX A910, Gertec GPOS720 and Tectoy T4.
+
+[![pub package](https://img.shields.io/pub/v/zoop_payment_tech.svg)](https://pub.dev/packages/zoop_payment_tech)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 <div align="center">
-  <img src="assets/zoop payment tech.png" alt="Stone" height="200" />
+  <img src="https://raw.githubusercontent.com/JY-Labtech/zoop_payment_tech/main/assets/zoop%20payment%20tech.png" alt="Zoop Payment Tech" height="200" />
 </div>
 
----
+Plugin Flutter **não oficial** e **open source** para o SDK Zoop SmartPOS no Android. Ele expõe em Dart as operações do SDK (ativação do terminal, pagamento no crédito, PIX e cancelamento) por meio de um `MethodChannel`, sem que você precise escrever Kotlin.
 
-## 🚨 Aviso
+> **Aviso:** este pacote não é mantido pela Zoop. O uso do SDK continua sujeito aos termos da Zoop. O plugin ainda não foi validado em todos os terminais; teste no seu aparelho antes de ir para produção.
 
-> **Este plugin é _não oficial_** e foi desenvolvido de forma independente para facilitar a integração de pagamentos via SDK da Zoop em dispositivos Android Smart POS.
+## Índice
 
-##### 🚨 Este plugin ainda não foi testado em dispositivos reais, caso tenha interesse em utilizá-lo entre em contato com nossa equipe.🚨
+1. [Funcionalidades](#funcionalidades)
+2. [Terminais compatíveis e requisitos](#terminais-compatíveis-e-requisitos)
+3. [Instalação](#instalação)
+4. [Configuração Android](#configuração-android)
+5. [Uso rápido](#uso-rápido)
+6. [Referência da API](#referência-da-api)
+7. [Exemplos por operação](#exemplos-por-operação)
+8. [Tratamento de erros](#tratamento-de-erros)
+9. [App de exemplo](#app-de-exemplo)
+10. [Testes](#testes)
+11. [Migração da 1.x para a 2.0](#migração-da-1x-para-a-20)
+12. [Contribuindo](#contribuindo)
+13. [Licença](#licença)
+14. [Créditos](#créditos)
 
----
+## Funcionalidades
 
-Plugin Flutter para integração com o SDK Zoop SmartPOS. Este plugin abstrai toda a complexidade do código nativo Android, permitindo que desenvolvedores Flutter integrem facilmente funcionalidades de pagamento através de terminais SmartPOS da Zoop usando apenas código Dart/Flutter.
+| Operação | Método | Callbacks principais |
+| --- | --- | --- |
+| Inicializar o SDK (com ou sem credenciais) | `initialize` | — |
+| Ativar/logar o terminal pelo Dashboard Zoop | `login` | `onToken`, `onMessage`, `onSuccess`, `onError` |
+| Verificar se a chave Zoop está gravada no terminal | `checkZoopKey` | `onMessage`, `onError` |
+| Pagamento no crédito à vista ou parcelado | `creditPayment` | `onLoading`, `onMessage`, `onSuccess`, `onError` |
+| Pagamento PIX com QR Code | `pixPayment` | `onQRCode`, `onLoading`, `onMessage`, `onSuccess`, `onError` |
+| Cancelamento (estorno) de transação | `voidTransaction` + `selectVoidTransaction` | `onVoidTransactionList`, `onSuccess`, `onError` |
+| Cancelar a operação em andamento | `cancelOperation` | — |
+| Versão do Android (canal) | `getPlatformVersion` (só no canal nativo) | — |
 
-## 📋 Índice
+Não suportado nesta versão: débito, voucher, reimpressão, impressão de texto/imagem e NFC (o plugin só envia `Option.CREDIT` ao SDK).
 
-- [Sobre o Plugin](#sobre-o-plugin)
-- [Como Funciona](#como-funciona)
-- [Funcionalidades](#funcionalidades)
-- [Requisitos](#requisitos)
-- [Configuração](#configuração)
-- [Licença do Plugin (validação)](#licença-do-plugin-validação)
-- [Guia de Uso](#guia-de-uso)
-- [Exemplos Práticos](#exemplos-práticos)
-- [Tratamento de Erros](#tratamento-de-erros)
-- [Boas Práticas](#boas-práticas)
-- [Estrutura do Projeto](#estrutura-do-projeto)
-- [Testes](#testes)
-- [Licença](#licença)
+## Terminais compatíveis e requisitos
 
-## 🎯 Sobre o Plugin
+**Terminais SmartPOS (um flavor por terminal):**
 
-O `zoop_payment_tech` é um plugin Flutter que serve como uma camada de abstração entre seu aplicativo Flutter e o SDK nativo Android da Zoop. Ele foi desenvolvido seguindo o mesmo padrão arquitetural do plugin `stone_payment_tech`, garantindo consistência e facilidade de uso.
+| Terminal | Flavor | Artefato do SDK Zoop |
+| --- | --- | --- |
+| PAX A910 | `paxA910` | `br.zoop.pos.plugin:smartpos-pax-a910:1.12.11` |
+| Gertec GPOS720 | `gertecGpos720` | `br.zoop.pos.plugin:smartpos-gertec-gpos720:1.12.11` (+ `slf4j-api` e `logback-android`) |
+| Tectoy T4 | `tectoyT4` | `br.zoop.pos.plugin:smartpos-tectoy-t4:1.12.11` |
 
-### Objetivo
+**Requisitos:**
 
-Facilitar a integração de pagamentos via terminais SmartPOS da Zoop em aplicativos Flutter, eliminando a necessidade de escrever código Kotlin/Java. Toda a comunicação é feita através de Method Channels, e o desenvolvedor trabalha apenas com código Dart.
+- Android **minSdk 23** (Android 6.0); o plugin compila com `compileSdk 34`.
+- **Dart 3.9.2+** (Flutter 3.35 ou mais novo).
+- **JDK 17** para o build Android (AGP 8.11+, Kotlin 1.9.25+).
+- **Core library desugaring** habilitado no app (o plugin usa).
+- Uma conta Zoop (marketplace/seller) e o terminal ativado no **Dashboard Zoop**.
+- Acesso ao **GitHub Packages da Zoop** (`getzoop/zoop-package-public`) com um usuário GitHub e um token com `read:packages`. Veja [Credenciais do GitHub Packages](#1-credenciais-do-github-packages-sdk-zoop).
+- Permissões: o plugin não declara permissões próprias. O SDK da Zoop conversa com a API da Zoop, então o app precisa de acesso à internet (veja [Manifest](#4-manifest)).
 
-### Benefícios
+## Instalação
 
-- ✅ **Abstração completa**: Não precisa lidar com código nativo
-- ✅ **Type-safe**: Interface Dart com tipagem forte
-- ✅ **Callbacks assíncronos**: Sistema de callbacks para feedback em tempo real
-- ✅ **Validação de licença**: Sistema integrado de validação de licenças
-- ✅ **Multi-terminal**: Suporte para diferentes modelos de terminais
-
-## 🔧 Como Funciona
-
-### Arquitetura
-
-O plugin utiliza uma arquitetura em camadas:
-
-```
-┌─────────────────────────────────────┐
-│      Aplicação Flutter (Dart)      │
-│                                     │
-│  ┌───────────────────────────────┐ │
-│  │   ZoopPaymentTech (API)      │ │
-│  │   Payment (Métodos)           │ │
-│  │   IZoopHandler (Callbacks)   │ │
-│  └───────────────┬───────────────┘ │
-└──────────────────┼──────────────────┘
-                   │ Method Channel
-                   ▼
-┌─────────────────────────────────────┐
-│      Plugin Android (Kotlin)         │
-│                                     │
-│  ┌───────────────────────────────┐ │
-│  │  ZoopPaymentTechPlugin        │ │
-│  │  CheckLicenceTech             │ │
-│  │  (Validação de Licença)       │ │
-│  └───────────────┬───────────────┘ │
-└──────────────────┼──────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────┐
-│      SDK Zoop SmartPOS              │
-│      (Biblioteca Nativa)            │
-└─────────────────────────────────────┘
+```bash
+flutter pub add zoop_payment_tech
 ```
 
-### Fluxo de Validação de Licença
-
-Antes de **cada** operação (inicialização, login, pagamentos, cancelamento etc.), o plugin valida automaticamente a licença:
-
-1. **Validação Remota**: A primeira operação depois de abrir o app sempre consulta o servidor oficial da JY Labtech (`https://licence-server.invalid/pos-payments/licence/check`), fora da thread principal; depois, a licença é consultada de novo a cada 4 horas de uso
-2. **Armazenamento Seguro**: Salva a licença de forma criptografada no dispositivo
-3. **Cache offline**: A licença salva só é usada quando o servidor não responde (sem internet, timeout ou erro 5xx), por no máximo 72 horas desde a última validação online e até a data de vencimento (`expiredAt`)
-4. **Bloqueio imediato**: Se o servidor recusar a licença (cliente bloqueado, licença vencida, suspensa ou cancelada, não encontrada, aparelho desativado), o cache é apagado e a operação é recusada com o erro `LICENCE_ERROR`; o SDK da Zoop não é chamado
-
-Detalhes em [Licença do Plugin (validação)](#licença-do-plugin-validação).
-
-### Sistema de Callbacks
-
-O plugin utiliza callbacks assíncronos para comunicação em tempo real:
-
-- **onSuccess**: Operação concluída com sucesso
-- **onError**: Erro durante a operação
-- **onMessage**: Mensagens informativas durante o processo
-- **onLoading**: Indicador de carregamento
-- **onQRCode**: QR Code gerado (para PIX)
-- **onToken**: Token de ativação (para login)
-- **onVoidTransactionList**: Lista de transações para cancelamento
-
-## ✨ Funcionalidades
-
-- ✅ **Login/Ativação**: Ativação do terminal via Dashboard Zoop
-- ✅ **Validação de Chave**: Verificação da chave Zoop no terminal
-- ✅ **Pagamento no Crédito**: Transações de crédito com suporte a parcelamento
-- ✅ **Pagamento PIX**: Pagamentos via PIX com geração de QR Code
-- ✅ **Cancelamento**: Cancelamento de transações realizadas
-- ✅ **Validação de Licença**: Sistema integrado de controle de licenças
-- ✅ **Callbacks em Tempo Real**: Feedback imediato durante as operações
-
-## 📦 Requisitos
-
-### Requisitos de Sistema
-
-- **Flutter SDK**: >= 3.3.0
-- **Dart SDK**: >= 3.9.2
-- **Android**: minSdk 23 (Android 6.0+)
-- **Java**: 17+
-- **Gradle**: 8.11.1+
-
-### Terminais Suportados
-
-O plugin suporta os seguintes modelos de terminais SmartPOS:
-
-- **PAX A910**: Terminal PAX modelo A910
-- **Gertec GPOS720**: Terminal Gertec modelo GPOS720
-- **Tectoy T4**: Terminal Tectoy modelo T4
-
-### Requisitos de Configuração
-
-Para utilizar o plugin, você precisará de:
-
-1. **Credenciais GitHub**: Para acessar o repositório Maven do SDK Zoop
-
-   - Usuário GitHub
-   - Personal Access Token (PAT) com permissão de leitura de pacotes
-
-2. **Licenças**: Chaves de licença válidas para o plugin
-
-   - `licenceKey`: sua chave de licença, adquirida no portal [https://portal.jylabtech.com.br](https://portal.jylabtech.com.br)
-   - `licenceInternalKey` (opcional): endereço da API de validação. Se omitido, o plugin usa o servidor oficial da JY Labtech
-
-3. **Terminal Físico**: Um terminal SmartPOS compatível conectado ao dispositivo Android
-
-## ⚙️ Configuração
-
-### 1. Adicionar Dependência
-
-Adicione o plugin ao seu `pubspec.yaml`:
+ou no `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter:
-    sdk: flutter
-  zoop_payment_tech: ^1.2.0
+  zoop_payment_tech: ^2.0.0
 ```
 
-Execute:
+## Configuração Android
 
-```bash
-flutter pub get
-```
+### 1. Credenciais do GitHub Packages (SDK Zoop)
 
-### 2. Configurar Credenciais do GitHub
+O SDK Zoop é distribuído pelo GitHub Packages, que **exige autenticação mesmo para pacotes públicos**. Cada desenvolvedor (e o CI) usa as **próprias** credenciais; o plugin não traz nenhuma.
 
-O SDK Zoop está hospedado em um repositório Maven privado do GitHub. Você precisa configurar as credenciais em **dois lugares**:
+1. No GitHub: **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token**.
+2. Marque apenas o escopo `read:packages` e gere o token.
+3. Disponibilize `GITHUB_USER` (seu usuário GitHub) e `GITHUB_PAT` (o token) ao Gradle de **uma** destas formas:
 
-#### No Plugin (`android/local.properties`):
+   - **Recomendado:** no `~/.gradle/gradle.properties` da sua máquina (fora do repositório):
 
-```properties
-GITHUB_USER=seu_usuario_github
-GITHUB_PAT=sua_personal_access_token
-```
+     ```properties
+     GITHUB_USER=seu_usuario_github
+     GITHUB_PAT=ghp_seu_token
+     ```
 
-#### No Seu Projeto (`seu_projeto/android/local.properties`):
+   - Variáveis de ambiente (bom para CI):
 
-Se você estiver usando o plugin em um projeto Flutter separado, também precisa configurar as credenciais no `local.properties` do seu projeto:
+     ```bash
+     export GITHUB_USER=seu_usuario_github
+     export GITHUB_PAT=ghp_seu_token
+     ```
 
-```properties
-GITHUB_USER=seu_usuario_github
-GITHUB_PAT=sua_personal_access_token
-```
+   - Na linha de comando: `./gradlew assembleDebug -PGITHUB_USER=... -PGITHUB_PAT=...`.
 
-**Nota**: Se você estiver usando o projeto exemplo (`example`), configure também em `example/android/local.properties`.
+O `build.gradle` do plugin lê `GITHUB_USER`/`GITHUB_PAT` das propriedades do Gradle (`-P` ou `gradle.properties`) ou, na falta delas, das variáveis de ambiente. Ele **não** lê o `local.properties`. Nunca commite o token: se preferir o `local.properties` do app, use o snippet abaixo, que o lê também (o `local.properties` já fica fora do git e do pacote).
 
-**Importante**: Além das credenciais, você também precisa configurar o repositório Maven do GitHub no arquivo `build.gradle.kts` ou `build.gradle` do seu projeto. O projeto exemplo já está configurado automaticamente, mas se você criar um novo projeto, adicione o seguinte no arquivo `android/build.gradle.kts`:
+### 2. Repositório Maven no app
+
+O plugin já registra o repositório nos projetos do build, mas declare-o também no `android/build.gradle.kts` do app (obrigatório se o seu `settings.gradle` centraliza repositórios em `dependencyResolutionManagement`):
 
 ```kotlin
+// android/build.gradle.kts
 val localProperties = java.util.Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -221,7 +139,7 @@ allprojects {
 }
 ```
 
-Para projetos usando **Groovy DSL** (`build.gradle`), adicione no arquivo `android/build.gradle`:
+Groovy (`android/build.gradle`):
 
 ```gradle
 allprojects {
@@ -239,1203 +157,480 @@ allprojects {
 }
 ```
 
-**Como criar um Personal Access Token**:
+Sem credenciais válidas o build falha ao baixar `br.zoop.pos.plugin:smartpos-*` (HTTP 401).
 
-1. Acesse GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
-2. Clique em "Generate new token"
-3. Selecione a permissão `read:packages`
-4. Copie o token gerado e use como `GITHUB_PAT`
+### 3. Flavors do terminal e desugaring
 
-**Alternativamente**, você pode configurar via variáveis de ambiente antes de compilar:
+O plugin tem a dimensão de flavor `terminal` com `paxA910`, `gertecGpos720` e `tectoyT4`; cada uma puxa o SDK daquele terminal. O app precisa declarar a mesma dimensão e os mesmos nomes (em camelCase):
 
-```bash
-export GITHUB_USER=seu_usuario_github
-export GITHUB_PAT=sua_personal_access_token
+```kotlin
+// android/app/build.gradle.kts
+android {
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    defaultConfig {
+        minSdk = 23 // ou flutter.minSdkVersion, se for >= 23
+    }
+
+    flavorDimensions += "terminal"
+    productFlavors {
+        create("paxA910") { dimension = "terminal" }
+        create("gertecGpos720") { dimension = "terminal" }
+        create("tectoyT4") { dimension = "terminal" }
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
 ```
 
-### 3. Configurar Licenças
-
-O plugin requer uma licença válida para funcionar. A chave é lida no momento do build a partir do `android/local.properties` **do seu aplicativo**:
-
-```properties
-licenceKey=SUA_CHAVE_DE_LICENCA
-# opcional: se omitido, o plugin usa o servidor oficial da JY Labtech
-licenceInternalKey=***REMOVIDO***
-```
-
-**Alternativamente**, via variáveis de ambiente (têm prioridade sobre o `local.properties`):
-
-```bash
-export LICENCE_KEY=SUA_CHAVE_DE_LICENCA
-export LICENCE_INTERNAL_KEY=***REMOVIDO***  # opcional
-```
-
-**Importante**:
-
-- Sem o `licenceKey` configurado, o plugin bloqueia todas as operações com o erro `LICENCE_ERROR`
-- O `licenceInternalKey` é **opcional**. O plugin sempre valida no servidor oficial da JY Labtech (`https://licence-server.invalid/pos-payments/licence/check`); o valor acima é o base64 desse endereço (também é aceita a URL em texto puro). Qualquer valor que não aponte para o servidor oficial (outro host, `http` sem TLS, base64 inválido ou o endereço antigo do Cloud Run) é ignorado e o servidor oficial é usado no lugar
-- Como os valores entram no `BuildConfig`, após alterá-los faça um build limpo (`flutter clean`) do aplicativo
-- Veja a seção [Licença do Plugin (validação)](#licença-do-plugin-validação) para planos, limites, erros e solução de problemas
-
-### 4. Configurar Flavor do Terminal
-
-No arquivo de build do seu aplicativo, configure o flavor correspondente ao seu terminal. O exemplo abaixo mostra a configuração para **Groovy DSL** (`build.gradle`) e **Kotlin DSL** (`build.gradle.kts`):
-
-#### Groovy DSL (`android/app/build.gradle`):
+Groovy (`android/app/build.gradle`):
 
 ```gradle
 android {
-    flavorDimensions += "terminal"
-
-    productFlavors {
-        paxA910 {
-            dimension = "terminal"
-        }
-        gertecGpos720 {
-            dimension = "terminal"
-        }
-        tectoyT4 {
-            dimension = "terminal"
-        }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
     }
+
+    flavorDimensions "terminal"
+    productFlavors {
+        paxA910 { dimension "terminal" }
+        gertecGpos720 { dimension "terminal" }
+        tectoyT4 { dimension "terminal" }
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
 }
 ```
 
-#### Kotlin DSL (`android/app/build.gradle.kts`):
+Se o app só atende um terminal e não quer flavors, escolha o do plugin com `missingDimensionStrategy "terminal", "paxA910"` dentro de `defaultConfig`.
 
-```kotlin
-android {
-    flavorDimensions += "terminal"
-
-    productFlavors {
-        create("paxA910") {
-            dimension = "terminal"
-        }
-        create("gertecGpos720") {
-            dimension = "terminal"
-        }
-        create("tectoyT4") {
-            dimension = "terminal"
-        }
-    }
-}
-```
-
-**Nota**: Certifique-se de usar nomes em **camelCase** (sem hífens) para os flavors, pois o Flutter espera esse formato ao usar `--flavor`.
-
-**Compilar para um terminal específico**:
+Build/execução por terminal:
 
 ```bash
-# Para PAX A910
-flutter build apk --flavor paxA910
-
-# Para Gertec GPOS720
+flutter run --flavor paxA910
 flutter build apk --flavor gertecGpos720
-
-# Para Tectoy T4
 flutter build apk --flavor tectoyT4
 ```
 
-### 5. Permissões Android
+### 4. Manifest
 
-Adicione as permissões necessárias no `AndroidManifest.xml`:
+O `AndroidManifest.xml` do plugin é vazio (sem permissões, activities ou intent filters). Garanta no manifest do app:
 
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
-## 🔑 Licença do Plugin (validação)
+Não há intent filters nem deep links: tudo acontece dentro do processo do app, pelo SDK.
 
-### Onde adquirir
+### Comportamento fixo do nativo
 
-As licenças são adquiridas e gerenciadas no portal **[https://portal.jylabtech.com.br](https://portal.jylabtech.com.br)** (o login é o mesmo e-mail/senha do portal anterior). O produto é a **"Licença plugin de pagamento"**, que vale para qualquer plugin de pagamento da JY Labtech.
+- Ambiente `Environment.Production`, log `LogLevel.Trace`, `strict = false` e timeout de 15 s.
+- O SDK é inicializado sem credenciais quando o plugin é registrado; `initialize(...)` ou o `login()` reinicializam com as credenciais.
 
-- **Chaves existentes continuam válidas**: quem já possui uma chave não precisa trocá-la. Chaves novas no formato `JYL-...` também funcionam.
-- **Plano `debug` (cortesia)**: concedido automaticamente ao se cadastrar no portal; permite até 2 aparelhos por 365 dias, ideal para desenvolvimento e testes.
-- **Plano `mensal`**: cobrado por dispositivo.
-- **Limite por dispositivo**: cada aparelho que valida a licença ocupa uma vaga. Aparelhos podem ser desativados pelo portal para liberar vagas (um aparelho desativado deixa de ser aceito).
-
-### Como configurar
-
-Configure o `licenceKey` conforme [3. Configurar Licenças](#3-configurar-licenças). O `licenceInternalKey` é opcional; se quiser informá-lo, o valor é:
-
-```
-***REMOVIDO***
-```
-
-> **A partir da 1.1.0:** a validação usa sempre o servidor oficial da JY Labtech. Valores do `licenceInternalKey` que apontem para outro endereço, inclusive o antigo (que começa com `***REMOVIDO***...`), são ignorados. Não é preciso trocar a chave de licença.
-
-### Como funciona a validação
-
-- A validação é feita automaticamente antes de cada operação: `initialize`, `login`, `checkZoopKey`, `creditPayment`, `pixPayment`, `voidTransaction` e `selectVoidTransaction`. Ficam de fora apenas `getPlatformVersion` e `cancelOperation` (cancelar uma operação em andamento nunca é bloqueado).
-- A consulta de rede roda fora da thread principal, com timeout de 15 s para conexão e 15 s para leitura.
-- O plugin envia ao servidor a chave (`Authorization: Bearer licence:<licenceKey>`) e a identificação do aparelho (ANDROID_ID, número de série e modelo).
-- Só é aceita uma licença vigente: a resposta do servidor precisa ter `expiredAt` no futuro e não estar marcada como vencida (`isExpired`), inativa/suspensa (`isInactive`) ou cancelada (`isCanceled`). Uma resposta 200 com licença vencida, sem `expiredAt` ou com JSON inválido também bloqueia.
-- **Revalidação**: a primeira operação depois de abrir o app sempre consulta o servidor; depois, a licença é consultada de novo a cada **4 horas** de uso.
-- **Bloqueio imediato**: se o servidor recusar a licença (cliente bloqueado no portal, licença vencida, cancelada ou suspensa, não encontrada, aparelho desativado ou limite de aparelhos), o cache é apagado e as operações passam a falhar com `LICENCE_ERROR` na hora.
-- **Cache offline**: se aprovada, a licença é guardada de forma criptografada no aparelho. Ela só é usada quando o servidor não responde (sem internet, timeout, 408, 429 ou erro 5xx) e por no máximo **72 horas** desde a última validação online, até o vencimento (`expiredAt`). Depois de uma falha de rede o plugin espera 5 minutos antes de tentar o servidor de novo. O cache é descartado se for de outra chave, se a data em que foi salvo estiver no futuro (relógio adulterado) ou se tiver sido validado em outro servidor. Sem internet e sem cache válido, as operações falham com `LICENCE_ERROR`.
-- Se a licença for inválida, vencida, suspensa ou cancelada, a operação é bloqueada: o nativo responde `PlatformException` com código `LICENCE_ERROR`, o callback `onError` recebe `"Sua licença não foi ativada. <motivo>"` (por exemplo, a `message` devolvida pelo servidor) e o método do `Payment` retorna `false`. O SDK da Zoop não é chamado. O motivo também aparece no Logcat (tag `ZoopPaymentTechPlugin`).
-
-### Erros de licença
-
-| HTTP | Situação | O que fazer |
-| ---- | -------- | ----------- |
-| 400 | Aparelho sem identificador estável | Verifique se o app consegue ler o ANDROID_ID / número de série do aparelho |
-| 403 | Chave não enviada | Configure `licenceKey` e refaça o build |
-| 404 | Licença não encontrada | Confira a chave no portal (sem espaços ou quebras de linha) |
-| 412 | Limite de aparelhos atingido ou aparelho desativado | Desative aparelhos não usados ou contrate mais dispositivos no portal |
-| 428 | Licença vencida, suspensa ou cancelada | Renove ou regularize a licença no portal |
-| 429 | Muitas requisições (rate limit) | Aguarde alguns instantes e tente novamente |
-
-Todas as respostas de erro trazem um JSON `{"message": "..."}` com a descrição, repassada ao `onError`. Sem corpo JSON, a mensagem é `Erro ao validar licença (HTTP <código>)`.
-
-### Solução de problemas
-
-- **"Licença não configurada"**: `licenceKey` vazio. Confira o `android/local.properties` do app (ou as variáveis de ambiente) e faça `flutter clean` antes de compilar.
-- **Trocou a chave e nada mudou**: os valores são gravados no `BuildConfig`; faça um build limpo. Ao trocar a chave, o cache local é descartado e a licença é consultada novamente.
-- **Funciona offline e depois para**: o cache local expira 72 horas após a última validação online (ou no vencimento da licença). Conecte o aparelho à internet e repita a operação.
-- **Erro de conexão/timeout**: o aparelho precisa acessar `https://licence-server.invalid`. Verifique rede, proxy ou firewall.
-
-## 📖 Guia de Uso
-
-### 1. Inicializar o Plugin
-
-Primeiro, crie uma classe que implementa `IZoopHandler` para receber os callbacks:
-
-```dart
-import 'package:zoop_payment_tech/zoop_payment_tech.dart';
-
-class MyZoopHandler implements IZoopHandler {
-  @override
-  Future<void> onSuccess(String message) async {
-    print('✅ Sucesso: $message');
-    // Atualizar UI, mostrar mensagem de sucesso, etc.
-  }
-
-  @override
-  Future<void> onError(String message) async {
-    print('❌ Erro: $message');
-    // Mostrar erro ao usuário, registrar erro, etc.
-  }
-
-  @override
-  Future<void> onMessage(String message) async {
-    print('ℹ️ Mensagem: $message');
-    // Atualizar status na UI, mostrar mensagem informativa
-  }
-
-  @override
-  Future<void> onLoading(bool show) async {
-    print('⏳ Loading: $show');
-    // Mostrar/esconder indicador de carregamento
-  }
-
-  @override
-  Future<void> onQRCode(String qrCode) async {
-    print('📱 QR Code recebido');
-    // Exibir QR Code para o usuário escanear
-  }
-
-  @override
-  Future<void> onToken(String token) async {
-    print('🔑 Token: $token');
-    // Exibir token para o usuário inserir no dashboard
-  }
-
-  @override
-  Future<void> onVoidTransactionList(
-    List<Map<String, dynamic>> transactions,
-  ) async {
-    print('📋 Transações: ${transactions.length}');
-    // Exibir lista de transações para seleção
-  }
-}
-```
-
-Agora, inicialize o plugin:
-
-```dart
-// Obter instância singleton
-final payment = ZoopPaymentTech.I.initPayment(
-  handler: MyZoopHandler(),
-);
-```
-
-### 2. Login/Ativação do Terminal
-
-#### Primeira Ativação (sem credenciais)
-
-```dart
-// Inicializar SDK sem credenciais
-await payment.initialize();
-
-// Iniciar processo de login
-await payment.login(downloadTheme: false);
-
-// O callback onToken será chamado com o token
-// O usuário deve inserir esse token no dashboard Zoop
-// Após confirmação, onSuccess será chamado com as credenciais
-```
-
-#### Login com Credenciais Salvas
-
-Se você já possui as credenciais salvas (recomendado salvar após primeira ativação):
-
-```dart
-await payment.initialize(
-  marketplace: 'seu_marketplace_id',
-  seller: 'seu_seller_id',
-  accessKey: 'sua_access_key',
-);
-```
-
-**Salvando credenciais após login**:
-
-```dart
-class MyZoopHandler implements IZoopHandler {
-  // ... outros métodos ...
-
-  @override
-  Future<void> onSuccess(String message) async {
-    // Quando receber sucesso no login, salvar credenciais
-    if (message.contains('Login realizado')) {
-      // Salvar credenciais em SharedPreferences ou banco de dados
-      // await _saveCredentials(marketplace, seller, accessKey);
-    }
-  }
-}
-```
-
-### 3. Verificar Chave Zoop
-
-Antes de realizar pagamentos, verifique se a chave Zoop está instalada no terminal:
-
-```dart
-await payment.checkZoopKey();
-
-// O callback onMessage será chamado com:
-// - "Chave Zoop encontrada" (se houver chave)
-// - "Chave ausente, necessário envio para PAX para gravação de chave" (se não houver)
-```
-
-### 4. Realizar Pagamento no Crédito
-
-```dart
-await payment.creditPayment(
-  amount: 5000, // R$ 50,00 (valor em centavos)
-  installments: 3, // 3 parcelas
-);
-
-// Durante o processo:
-// - onLoading(true) será chamado
-// - onMessage será chamado com mensagens como "Insira o cartão", "Digite o PIN", etc.
-// - onSuccess será chamado quando o pagamento for aprovado
-// - onError será chamado se houver erro
-// - onLoading(false) será chamado ao final
-```
-
-### 5. Realizar Pagamento PIX
-
-```dart
-await payment.pixPayment(
-  amount: 5000, // R$ 50,00 (valor em centavos)
-);
-
-// Durante o processo:
-// - onQRCode será chamado com o QR Code em formato string
-// - Exiba o QR Code para o cliente escanear
-// - onSuccess será chamado quando o pagamento for confirmado
-```
-
-### 6. Cancelar Transação
-
-```dart
-// Iniciar processo de cancelamento
-await payment.voidTransaction();
-
-// O callback onVoidTransactionList será chamado com a lista de transações
-// Exiba a lista para o usuário selecionar
-
-// Quando o usuário selecionar uma transação:
-await payment.selectVoidTransaction('chave_da_transacao_selecionada');
-
-// onSuccess será chamado quando o cancelamento for concluído
-```
-
-### 7. Cancelar Operação Atual
-
-Para cancelar uma operação em andamento:
-
-```dart
-await payment.cancelOperation();
-```
-
-## 💻 Exemplos Práticos
-
-### Exemplo Completo: Tela de Pagamentos
+## Uso rápido
 
 ```dart
 import 'package:flutter/material.dart';
 import 'package:zoop_payment_tech/zoop_payment_tech.dart';
-import 'dart:convert';
 
-class PaymentScreen extends StatefulWidget {
-  const PaymentScreen({super.key});
+void main() => runApp(const MaterialApp(home: PaymentPage()));
+
+class PaymentPage extends StatefulWidget {
+  const PaymentPage({super.key});
 
   @override
-  State<PaymentScreen> createState() => _PaymentScreenState();
+  State<PaymentPage> createState() => _PaymentPageState();
 }
 
-class _PaymentScreenState extends State<PaymentScreen> implements IZoopHandler {
-  late Payment _payment;
-  String _statusMessage = 'Pronto para operações';
-  bool _isLoading = false;
-  String? _qrCode;
-  String? _token;
-  List<Map<String, dynamic>> _voidTransactions = [];
+class _PaymentPageState extends State<PaymentPage> implements IZoopHandler {
+  late final Payment _payment;
+  String _status = 'Pronto';
 
   @override
   void initState() {
     super.initState();
-    _initializePayment();
-  }
-
-  void _initializePayment() {
     _payment = ZoopPaymentTech.I.initPayment(handler: this);
-  }
-
-  Future<void> _handleLogin() async {
-    setState(() {
-      _statusMessage = 'Iniciando login...';
-      _isLoading = true;
-    });
-
-    // Primeiro, inicializar sem credenciais
-    await _payment.initialize();
-
-    // Depois, iniciar login
-    await _payment.login(downloadTheme: false);
-  }
-
-  Future<void> _handleCheckKey() async {
-    setState(() {
-      _statusMessage = 'Verificando chave Zoop...';
-      _isLoading = true;
-    });
-    await _payment.checkZoopKey();
-  }
-
-  Future<void> _handleCreditPayment(double value) async {
-    final amountInCents = (value * 100).toInt();
-
-    setState(() {
-      _statusMessage = 'Preparando pagamento de R\$ ${value.toStringAsFixed(2)}...';
-      _isLoading = true;
-    });
-
-    await _payment.creditPayment(
-      amount: amountInCents,
-      installments: 1,
+    // Com credenciais já conhecidas do Dashboard Zoop; sem elas, use _payment.login().
+    _payment.initialize(
+      marketplace: 'SEU_MARKETPLACE_ID',
+      seller: 'SEU_SELLER_ID',
+      accessKey: 'SUA_ACCESS_KEY',
     );
   }
 
-  Future<void> _handlePixPayment(double value) async {
-    final amountInCents = (value * 100).toInt();
-
-    setState(() {
-      _statusMessage = 'Gerando QR Code PIX...';
-      _isLoading = true;
-      _qrCode = null;
-    });
-
-    await _payment.pixPayment(amount: amountInCents);
+  Future<void> _pay() async {
+    // R$ 50,00 em 3x. O retorno indica só se a operação foi enviada ao SDK.
+    final sent = await _payment.creditPayment(amount: 5000, installments: 3);
+    if (!sent) setState(() => _status = 'Não foi possível iniciar o pagamento');
   }
 
-  Future<void> _handleVoidTransaction() async {
-    setState(() {
-      _statusMessage = 'Carregando transações...';
-      _isLoading = true;
-      _voidTransactions = [];
-    });
-
-    await _payment.voidTransaction();
-  }
-
-  Future<void> _handleSelectTransaction(String transactionKey) async {
-    setState(() {
-      _statusMessage = 'Cancelando transação...';
-      _isLoading = true;
-    });
-
-    await _payment.selectVoidTransaction(transactionKey);
-  }
-
-  Future<void> _handleCancelOperation() async {
-    await _payment.cancelOperation();
-    setState(() {
-      _statusMessage = 'Operação cancelada';
-      _isLoading = false;
-    });
-  }
-
-  // Implementação dos callbacks
-  @override
-  Future<void> onSuccess(String message) async {
-    setState(() {
-      _statusMessage = '✅ $message';
-      _isLoading = false;
-    });
-
-    // Limpar QR Code após sucesso
-    if (message.contains('PIX') || message.contains('pagamento')) {
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          setState(() {
-            _qrCode = null;
-          });
-        }
-      });
-    }
+  void _show(String text) {
+    if (mounted) setState(() => _status = text);
   }
 
   @override
-  Future<void> onError(String message) async {
-    setState(() {
-      _statusMessage = '❌ Erro: $message';
-      _isLoading = false;
-    });
-
-    // Mostrar dialog de erro
-    if (mounted) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Erro'),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
+  Future<void> onSuccess(String message) async => _show('Aprovado: $message');
 
   @override
-  Future<void> onMessage(String message) async {
-    setState(() {
-      _statusMessage = message;
-    });
-  }
+  Future<void> onError(String message) async => _show('Erro: $message');
 
   @override
-  Future<void> onLoading(bool show) async {
-    setState(() {
-      _isLoading = show;
-    });
-  }
+  Future<void> onMessage(String message) async => _show(message);
 
   @override
-  Future<void> onQRCode(String qrCode) async {
-    setState(() {
-      _qrCode = qrCode;
-      _statusMessage = 'QR Code gerado. Escaneie para pagar.';
-    });
-  }
+  Future<void> onLoading(bool show) async {}
 
   @override
-  Future<void> onToken(String token) async {
-    setState(() {
-      _token = token;
-      _statusMessage = 'Token gerado: $token\nInsira no dashboard Zoop.';
-    });
-
-    // Mostrar dialog com token
-    if (mounted) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Token de Ativação'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                token,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text('Insira este token no dashboard Zoop para continuar.'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
+  Future<void> onQRCode(String qrCode) async {}
 
   @override
-  Future<void> onVoidTransactionList(
-    List<Map<String, dynamic>> transactions,
-  ) async {
-    setState(() {
-      _voidTransactions = transactions;
-      _isLoading = false;
-      _statusMessage = 'Selecione uma transação para cancelar';
-    });
+  Future<void> onToken(String token) async => _show('Token de ativação: $token');
 
-    // Mostrar dialog com lista de transações
-    if (mounted && transactions.isNotEmpty) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Transações para Cancelamento'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: transactions.length,
-              itemBuilder: (context, index) {
-                final transaction = transactions[index];
-                return ListTile(
-                  title: Text('R\$ ${transaction['amount']}'),
-                  subtitle: Text(
-                    '${transaction['date']} ${transaction['time']}',
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _handleSelectTransaction(transaction['transactionKey']);
-                  },
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
+  @override
+  Future<void> onVoidTransactionList(List<Map<String, dynamic>> transactions) async {}
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Zoop Payment Tech'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Status Card
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    if (_isLoading)
-                      const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: CircularProgressIndicator(),
-                      ),
-                    Text(
-                      _statusMessage,
-                      style: const TextStyle(fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Token Card (se houver)
-            if (_token != null)
-              Card(
-                color: Colors.amber[50],
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'Token para Ativação',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _token!,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // QR Code Card (se houver)
-            if (_qrCode != null)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'QR Code PIX',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      // Aqui você pode usar um pacote como qr_flutter para exibir o QR Code
-                      Container(
-                        width: 200,
-                        height: 200,
-                        color: Colors.grey[200],
-                        child: const Center(
-                          child: Text(
-                            'QR Code\n(Use pacote qr_flutter\npara exibir)',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _qrCode!,
-                        style: const TextStyle(fontSize: 10),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            const SizedBox(height: 16),
-
-            // Botões de Ação
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : _handleLogin,
-              icon: const Icon(Icons.login),
-              label: const Text('Login/Ativar Terminal'),
-            ),
-
-            const SizedBox(height: 8),
-
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : _handleCheckKey,
-              icon: const Icon(Icons.vpn_key),
-              label: const Text('Verificar Chave Zoop'),
-            ),
-
-            const SizedBox(height: 8),
-
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : () => _handleCreditPayment(50.0),
-              icon: const Icon(Icons.credit_card),
-              label: const Text('Pagamento Crédito (R\$ 50,00)'),
-            ),
-
-            const SizedBox(height: 8),
-
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : () => _handlePixPayment(50.0),
-              icon: const Icon(Icons.qr_code),
-              label: const Text('Pagamento PIX (R\$ 50,00)'),
-            ),
-
-            const SizedBox(height: 8),
-
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : _handleVoidTransaction,
-              icon: const Icon(Icons.cancel),
-              label: const Text('Cancelar Transação'),
-            ),
-
-            const SizedBox(height: 8),
-
-            OutlinedButton.icon(
-              onPressed: _isLoading ? _handleCancelOperation : null,
-              icon: const Icon(Icons.stop),
-              label: const Text('Cancelar Operação Atual'),
-            ),
-          ],
-        ),
+      appBar: AppBar(title: const Text('Zoop')),
+      body: Center(child: Text(_status, textAlign: TextAlign.center)),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _pay,
+        label: const Text('Cobrar R\$ 50,00'),
       ),
     );
   }
 }
 ```
 
-### Exemplo: Gerenciamento de Estado com Provider
+## Referência da API
+
+Tudo é exportado por `package:zoop_payment_tech/zoop_payment_tech.dart`.
+
+### Fluxo assíncrono
+
+Cada método de `Payment` devolve `Future<bool>`:
+
+- `true`: o nativo aceitou a chamada e enviou a operação ao SDK. **Não significa aprovação.**
+- `false`: o nativo respondeu erro (`PlatformException`) ou o plugin não está registrado (`MissingPluginException`). O erro é registrado com `dart:developer` `log` e não é relançado.
+
+O resultado real (aprovado, recusado, cancelado) chega pelos callbacks do seu `IZoopHandler`.
+
+### `ZoopPaymentTech`
+
+Singleton de entrada.
+
+| Membro | Descrição |
+| --- | --- |
+| `static ZoopPaymentTech get I` | Instância única. |
+| `Payment initPayment({required IZoopHandler handler})` | Cria o `Payment` e registra o handler dos callbacks. Chamadas seguintes devolvem o mesmo `Payment` (use `setHandler` para trocar o handler). |
+| `Payment get payment` | O `Payment` já criado. Lança erro se `initPayment` não foi chamado. |
 
 ```dart
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:zoop_payment_tech/zoop_payment_tech.dart';
+final payment = ZoopPaymentTech.I.initPayment(handler: MyHandler());
+// depois, em qualquer lugar:
+final same = ZoopPaymentTech.I.payment;
+```
 
-// Provider para gerenciar estado
-class PaymentProvider extends ChangeNotifier implements IZoopHandler {
-  late Payment _payment;
-  String _statusMessage = '';
-  bool _isLoading = false;
-  String? _qrCode;
-  String? _token;
+`ZoopPaymentTechCore.I` (mesmos membros, com `channelName`) e `ZoopController` (`initPayment`/`payment`, para injeção de dependência) são alternativas equivalentes.
 
-  PaymentProvider() {
-    _payment = ZoopPaymentTech.I.initPayment(handler: this);
-  }
+### `Payment`
 
-  Payment get payment => _payment;
-  String get statusMessage => _statusMessage;
-  bool get isLoading => _isLoading;
-  String? get qrCode => _qrCode;
-  String? get token => _token;
+| Método | Parâmetros | Retorno |
+| --- | --- | --- |
+| `initialize({String? marketplace, String? seller, String? accessKey, bool downloadTheme = false})` | Credenciais Zoop. Se as três forem informadas, o SDK é reinicializado com elas; senão, sem credenciais. `downloadTheme` é enviado mas ignorado pelo nativo nesta operação. | `Future<bool>` |
+| `login({bool downloadTheme = false})` | Ativa o terminal pelo Dashboard Zoop. `downloadTheme` baixa os temas do dashboard. | `Future<bool>` |
+| `checkZoopKey()` | Verifica se a chave Zoop está gravada no terminal. | `Future<bool>` |
+| `creditPayment({required int amount, int installments = 1})` | `amount` em **centavos**; `installments` = número de parcelas (1 = à vista). | `Future<bool>` |
+| `pixPayment({required int amount})` | `amount` em centavos. | `Future<bool>` |
+| `voidTransaction()` | Inicia o cancelamento; a lista de transações chega em `onVoidTransactionList`. | `Future<bool>` |
+| `selectVoidTransaction(String transactionKey)` | Escolhe a transação a cancelar (chave vinda de `onVoidTransactionList`). | `Future<bool>`; `false` se a chave não existe ou não há cancelamento em andamento. |
+| `cancelOperation()` | Cancela pagamento, PIX, login ou cancelamento em andamento. | `Future<bool>` |
+| `setHandler(IZoopHandler handler)` | Troca o handler que recebe os callbacks. | `void` |
 
-  Future<void> login() async {
-    await _payment.login();
-  }
+```dart
+await payment.initialize();                       // sem credenciais
+await payment.login(downloadTheme: true);         // ativação
+await payment.checkZoopKey();
+await payment.creditPayment(amount: 1990);        // R$ 19,90 à vista
+await payment.pixPayment(amount: 1990);
+await payment.voidTransaction();
+await payment.selectVoidTransaction('chave');
+await payment.cancelOperation();
+payment.setHandler(OutroHandler());
+```
 
-  Future<void> creditPayment(int amount) async {
-    await _payment.creditPayment(amount: amount);
-  }
+### `IZoopHandler` (callbacks)
 
-  // Implementação dos callbacks
-  @override
-  Future<void> onSuccess(String message) async {
-    _statusMessage = message;
-    _isLoading = false;
-    notifyListeners();
-  }
+Implemente todos os métodos. O nativo os dispara durante as operações e eles rodam no isolate principal do app.
 
-  @override
-  Future<void> onError(String message) async {
-    _statusMessage = 'Erro: $message';
-    _isLoading = false;
-    notifyListeners();
-  }
+| Callback | Quando |
+| --- | --- |
+| `Future<void> onSuccess(String message)` | Operação concluída: `"Pagamento realizado com sucesso"`, `"Pagamento PIX realizado com sucesso"`, `"Cancelamento realizado com sucesso"`, `"Login realizado: <nome do seller>"`. |
+| `Future<void> onError(String message)` | Falha. Veja [Tratamento de erros](#tratamento-de-erros). |
+| `Future<void> onMessage(String message)` | Mensagens de andamento: do SDK (ex.: "Insira o cartão") e do plugin (`"Iniciando pagamento"`, `"Insira o PIN"`, `"PIN processado"`, `"Cartão inserido"`, `"Cartão removido"`, `"Requisitando token"`, `"Baixando temas"`, `"Login realizado"`, `"Chave Zoop encontrada"`, `"Chave ausente, necessário envio para PAX para gravação de chave"`, `"Processando cancelamento"`). |
+| `Future<void> onLoading(bool show)` | Início (`true`) e fim (`false`) de pagamento, PIX e cancelamento. |
+| `Future<void> onQRCode(String qrCode)` | Conteúdo do QR Code PIX (texto "copia e cola") para exibir ao cliente. |
+| `Future<void> onToken(String token)` | Token de ativação que o usuário digita no Dashboard Zoop durante o `login()`. |
+| `Future<void> onVoidTransactionList(List<Map<String, dynamic>> transactions)` | Transações canceláveis. Cada item tem `amount`, `date`, `time` e `transactionKey`. |
 
-  @override
-  Future<void> onMessage(String message) async {
-    _statusMessage = message;
-    notifyListeners();
-  }
+### Modelos
 
-  @override
-  Future<void> onLoading(bool show) async {
-    _isLoading = show;
-    notifyListeners();
-  }
+| Classe | Campos | Uso |
+| --- | --- | --- |
+| `ZoopVoidTransaction` | `amount`, `date`, `time`, `transactionKey` (`String`) | `ZoopVoidTransaction.fromJson(item)` para tipar os itens de `onVoidTransactionList` (os valores vêm do SDK; se algum não for `String`, leia o `Map` direto). |
+| `ZoopCredentials` | `marketplace`, `seller`, `terminal`, `accessKey`, `sellerName?` | Para guardar as credenciais do seu lado e repassar a `initialize`. |
+| `ZoopResponse` | `success`, `message?`, `data?` | Modelo genérico com `fromJson`/`toJson`. |
 
+Todos têm `fromJson` e `toJson`.
+
+### Outros
+
+- `IZoopHelper.callHandler({required MethodCall call, required IZoopHandler iZoopHandler})`: converte uma chamada do canal no callback correspondente (usado internamente).
+- Constantes: `CHANNEL_NAME` (`"zoop_payment_tech"`) e `USER_REFERENCE` (`"SMARTPOS"`).
+- Enums: a API Dart não expõe enums; a forma de pagamento é escolhida pelo método (`creditPayment`/`pixPayment`) e as parcelas por `installments`.
+
+## Exemplos por operação
+
+### Ativação do terminal (primeiro uso)
+
+```dart
+await payment.initialize();      // sem credenciais
+await payment.login();
+// onToken(token): mostre o token; o lojista o digita no Dashboard Zoop.
+// onSuccess("Login realizado: <seller>"): o SDK foi reinicializado com as credenciais.
+```
+
+O plugin não devolve as credenciais (`marketplace`, `seller`, `accessKey`) ao Dart: elas ficam no SDK em memória. Se quiser pular a ativação nas próximas aberturas do app, obtenha as credenciais do Dashboard Zoop, guarde-as com segurança (ex.: `flutter_secure_storage`) e chame `initialize(...)` com elas.
+
+### Inicialização com credenciais conhecidas
+
+```dart
+final creds = ZoopCredentials(
+  marketplace: 'MARKETPLACE_ID',
+  seller: 'SELLER_ID',
+  terminal: 'TERMINAL_ID',
+  accessKey: 'ACCESS_KEY',
+);
+await payment.initialize(
+  marketplace: creds.marketplace,
+  seller: creds.seller,
+  accessKey: creds.accessKey,
+);
+```
+
+### Verificar a chave Zoop
+
+```dart
+await payment.checkZoopKey();
+// onMessage("Chave Zoop encontrada") ou
+// onMessage("Chave ausente, necessário envio para PAX para gravação de chave")
+```
+
+### Crédito à vista
+
+```dart
+await payment.creditPayment(amount: 1000); // R$ 10,00, 1 parcela
+```
+
+### Crédito parcelado
+
+```dart
+await payment.creditPayment(amount: 30000, installments: 6); // R$ 300,00 em 6x
+```
+
+Sequência típica: `onLoading(true)` → `onMessage("Iniciando pagamento")` → mensagens do terminal/PIN → `onSuccess` ou `onError` → `onLoading(false)`.
+
+### PIX
+
+```dart
+class PixHandler implements IZoopHandler {
   @override
   Future<void> onQRCode(String qrCode) async {
-    _qrCode = qrCode;
-    notifyListeners();
-  }
-
-  @override
-  Future<void> onToken(String token) async {
-    _token = token;
-    notifyListeners();
-  }
-
-  @override
-  Future<void> onVoidTransactionList(
-    List<Map<String, dynamic>> transactions,
-  ) async {
-    // Implementar lógica de lista de transações
-    notifyListeners();
-  }
-}
-
-// Uso no MaterialApp
-void main() {
-  runApp(
-    ChangeNotifierProvider(
-      create: (_) => PaymentProvider(),
-      child: const MyApp(),
-    ),
-  );
-}
-
-// Widget consumindo o Provider
-class PaymentWidget extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<PaymentProvider>(
-      builder: (context, provider, child) {
-        return Column(
-          children: [
-            if (provider.isLoading)
-              const CircularProgressIndicator(),
-            Text(provider.statusMessage),
-            ElevatedButton(
-              onPressed: () => provider.creditPayment(5000),
-              child: const Text('Pagar R\$ 50,00'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-```
-
-### Exemplo: Salvando Credenciais
-
-```dart
-import 'package:shared_preferences/shared_preferences.dart';
-
-class CredentialsManager {
-  static const String _keyMarketplace = 'zoop_marketplace';
-  static const String _keySeller = 'zoop_seller';
-  static const String _keyAccessKey = 'zoop_access_key';
-
-  static Future<void> saveCredentials({
-    required String marketplace,
-    required String seller,
-    required String accessKey,
-  }) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyMarketplace, marketplace);
-    await prefs.setString(_keySeller, seller);
-    await prefs.setString(_keyAccessKey, accessKey);
-  }
-
-  static Future<Map<String, String>?> loadCredentials() async {
-    final prefs = await SharedPreferences.getInstance();
-    final marketplace = prefs.getString(_keyMarketplace);
-    final seller = prefs.getString(_keySeller);
-    final accessKey = prefs.getString(_keyAccessKey);
-
-    if (marketplace != null && seller != null && accessKey != null) {
-      return {
-        'marketplace': marketplace,
-        'seller': seller,
-        'accessKey': accessKey,
-      };
-    }
-    return null;
-  }
-
-  static Future<void> clearCredentials() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyMarketplace);
-    await prefs.remove(_keySeller);
-    await prefs.remove(_keyAccessKey);
-  }
-}
-
-// Uso no handler
-class MyZoopHandler implements IZoopHandler {
-  @override
-  Future<void> onSuccess(String message) async {
-    if (message.contains('Login realizado')) {
-      // Parsear credenciais da mensagem ou usar um callback específico
-      // Salvar credenciais
-      await CredentialsManager.saveCredentials(
-        marketplace: 'marketplace_id',
-        seller: 'seller_id',
-        accessKey: 'access_key',
-      );
-    }
-  }
-
-  // ... outros métodos ...
-}
-```
-
-## ⚠️ Tratamento de Erros
-
-### Erros Comuns e Soluções
-
-#### 1. Erro de Licença
-
-Os métodos do `Payment` não lançam exceções: retornam `false` em caso de falha e o motivo chega pelo callback `onError`. Quando a licença é inválida, vencida, suspensa ou cancelada, a operação não é executada e `onError` recebe `"Sua licença não foi ativada. <motivo>"` (veja [Erros de licença](#erros-de-licença)).
-
-```dart
-@override
-Future<void> onError(String message) async {
-  if (message.contains('licença')) {
-    // Licença inválida, vencida ou não configurada
-    // Verifique a licença em https://portal.jylabtech.com.br
-  }
-}
-```
-
-#### 2. Erro de Sessão Inválida
-
-```dart
-// No callback onError
-@override
-Future<void> onError(String message) async {
-  if (message.contains('invalid session') ||
-      message.contains('Não foi realizado um login')) {
-    // Sessão expirada ou não iniciada
-    // Re-executar login
-    await _payment.login();
-  }
-}
-```
-
-#### 3. Erro de Conexão
-
-```dart
-final ok = await payment.login();
-if (!ok) {
-  // Falha na operação (o motivo chega em onError)
-  // Verificar conectividade e tentar novamente
-}
-```
-
-### Padrão de Tratamento de Erros
-
-```dart
-class ErrorHandler {
-  static void handlePaymentError(String error, BuildContext context) {
-    String title = 'Erro';
-    String message = error;
-
-    if (error.contains('licença')) {
-      title = 'Erro de Licença';
-      message = 'Sua licença não está ativa. Verifique-a em https://portal.jylabtech.com.br.';
-    } else if (error.contains('session')) {
-      title = 'Sessão Expirada';
-      message = 'Por favor, faça login novamente.';
-    } else if (error.contains('network')) {
-      title = 'Erro de Conexão';
-      message = 'Verifique sua conexão com a internet.';
-    }
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-```
-
-## 💡 Boas Práticas
-
-### 1. Gerenciamento de Estado
-
-- Use um gerenciador de estado (Provider, Riverpod, Bloc) para manter o estado do pagamento
-- Separe a lógica de negócio da UI
-- Mantenha o handler como parte do gerenciador de estado
-
-### 2. Tratamento de Callbacks
-
-- Sempre trate todos os callbacks, mesmo que seja apenas para logging
-- Atualize a UI de forma reativa usando `setState` ou gerenciadores de estado
-- Implemente timeouts para operações que podem ficar travadas
-
-### 3. Armazenamento de Credenciais
-
-- Sempre salve as credenciais após login bem-sucedido
-- Use armazenamento seguro (SharedPreferences com criptografia ou banco de dados seguro)
-- Nunca logue credenciais em produção
-
-### 4. Validação de Entrada
-
-```dart
-bool _validateAmount(double amount) {
-  if (amount <= 0) {
-    // Mostrar erro: valor inválido
-    return false;
-  }
-  if (amount > 999999.99) {
-    // Mostrar erro: valor muito alto
-    return false;
-  }
-  return true;
-}
-
-Future<void> _makePayment(double amount) async {
-  if (!_validateAmount(amount)) {
-    return;
-  }
-
-  final amountInCents = (amount * 100).toInt();
-  await payment.creditPayment(amount: amountInCents);
-}
-```
-
-### 5. Timeout de Operações
-
-```dart
-Future<bool> _makePaymentWithTimeout(int amount) async {
-  try {
-    await payment.creditPayment(amount: amount)
-        .timeout(
-          const Duration(minutes: 5),
-          onTimeout: () {
-            throw TimeoutException('Operação de pagamento expirou');
-          },
-        );
-    return true;
-  } catch (e) {
-    print('Erro: $e');
-    return false;
-  }
-}
-```
-
-### 6. Logging e Debug
-
-```dart
-class MyZoopHandler implements IZoopHandler {
-  final bool _enableLogging;
-
-  MyZoopHandler({bool enableLogging = false})
-      : _enableLogging = enableLogging;
-
-  void _log(String message) {
-    if (_enableLogging) {
-      print('[ZoopPaymentTech] $message');
-    }
+    // Exiba com um pacote de QR (ex.: qr_flutter): QrImageView(data: qrCode)
   }
 
   @override
   Future<void> onSuccess(String message) async {
-    _log('Success: $message');
-    // ... resto da implementação
+    // "Pagamento PIX realizado com sucesso"
   }
+
+  // ... demais callbacks
+  @override
+  Future<void> onError(String message) async {}
+  @override
+  Future<void> onMessage(String message) async {}
+  @override
+  Future<void> onLoading(bool show) async {}
+  @override
+  Future<void> onToken(String token) async {}
+  @override
+  Future<void> onVoidTransactionList(List<Map<String, dynamic>> transactions) async {}
+}
+
+await payment.pixPayment(amount: 2500); // R$ 25,00
+```
+
+### Cancelamento (estorno)
+
+```dart
+await payment.voidTransaction();
+
+// No handler:
+@override
+Future<void> onVoidTransactionList(List<Map<String, dynamic>> transactions) async {
+  // Mostre a lista e deixe o operador escolher; aqui, a primeira:
+  if (transactions.isEmpty) return;
+  final key = transactions.first['transactionKey'] as String;
+  final ok = await ZoopPaymentTech.I.payment.selectVoidTransaction(key);
+  if (!ok) {
+    // chave inexistente ou cancelamento não iniciado
+  }
+}
+// onSuccess("Cancelamento realizado com sucesso") ou onError(...)
+```
+
+### Cancelar a operação em andamento
+
+```dart
+await payment.cancelOperation();
+// Durante o login, onError("Operação cancelada").
+```
+
+## Tratamento de erros
+
+Os métodos de `Payment` **não lançam exceção**: retornam `false` quando o nativo responde erro. Os erros de negócio chegam por `onError`.
+
+**Códigos de `PlatformException` do nativo** (capturados pelo `Payment`, que retorna `false`):
+
+| Código | Quando |
+| --- | --- |
+| `ERROR` | `"Context not available"` (plugin sem contexto, em `initialize`); `"Transaction not found"` ou `"Transaction key required or void transaction not initialized"` (em `selectVoidTransaction`); exceção inesperada no nativo (nesse caso também chega `onError("Erro: <mensagem>")`). |
+| `notImplemented` (`MissingPluginException` no Dart) | Método desconhecido no canal ou plugin não registrado (ex.: rodando fora do Android). |
+
+**Mensagens de `onError`:**
+
+| Mensagem | Significado |
+| --- | --- |
+| `Não foi realizado um login` | O SDK respondeu "invalid session" no crédito ou PIX: ative o terminal (`login`) ou informe credenciais (`initialize`). |
+| `Falha no pagamento` / `Falha no pagamento PIX` | Falha sem mensagem do SDK. Outras falhas trazem a mensagem do SDK. |
+| `Operação cancelada` | Login cancelado (`cancelOperation`). |
+| `Falha ao requisitar token` | Não foi possível obter o token de ativação. |
+| `Erro ao baixar temas` | Falha ao baixar os temas do dashboard (`downloadTheme: true`). |
+| `Erro ao verificar chave` | Falha no `checkZoopKey`. |
+| `Falha na operação de cancelamento` / `Erro ao buscar transações` | Falha no estorno ou ao listar transações. |
+| `Erro ao processar callback: <detalhe>` | Um callback do nativo chegou com dados inesperados no Dart. |
+| `Erro desconhecido` | `onError` sem mensagem. |
+
+```dart
+final sent = await payment.creditPayment(amount: 1000);
+if (!sent) {
+  // a operação nem começou: verifique o flavor, o login e os logs (adb logcat -s ZoopPaymentTechPlugin)
 }
 ```
 
-## 📁 Estrutura do Projeto
+## App de exemplo
 
-```
-zoop_payment_tech/
-├── android/
-│   ├── build.gradle                 # Configuração do módulo Android
-│   ├── src/
-│   │   ├── main/
-│   │   │   ├── AndroidManifest.xml
-│   │   │   └── kotlin/
-│   │   │       └── br/com/jylabtech/zoop_payment_tech/
-│   │   │           ├── ZoopPaymentTechPlugin.kt    # Plugin principal
-│   │   │           └── licence/                     # Sistema de licenças
-│   │   │               ├── CheckLicenceTech.kt      # Cache criptografado + fluxo (Android)
-│   │   │               ├── CheckLicenceEntity.kt
-│   │   │               ├── LicenceConfig.kt         # URL oficial e resolveLicenceUrl
-│   │   │               ├── LicenceRules.kt          # Regras puras de validade/cache/HTTP
-│   │   │               ├── LicenceValidator.kt      # Fluxo servidor/cache (puro)
-│   │   │               ├── LicenceProvider.kt       # HTTP
-│   │   │               └── LicenceResult.kt
-│   │   └── test/kotlin/...licence/       # Testes JVM da licença
-│   └── gradle/wrapper/
-├── lib/
-│   ├── src/
-│   │   ├── app/
-│   │   │   └── controller/
-│   │   │       └── zoop_controller.dart
-│   │   ├── interface/
-│   │   │   ├── handler/
-│   │   │   │   └── izoop_handler.dart
-│   │   │   └── model/
-│   │   │       └── zoop_response.dart
-│   │   ├── licence/
-│   │   │   └── constants/
-│   │   │       └── licence_constants.dart
-│   │   ├── payments/
-│   │   │   ├── payment.dart
-│   │   │   └── helper/
-│   │   │       └── izoop_helper.dart
-│   │   ├── zoop_payment_tech_core.dart
-│   │   └── zoop_payment_tech.dart
-│   └── zoop_payment_tech.dart       # Arquivo principal de exportação
-├── test/                             # Testes Dart (flutter test)
-├── example/                          # Projeto de exemplo
-├── pubspec.yaml
-└── README.md
+O app em [`example/`](example) tem botões para login, verificação de chave, crédito, PIX, cancelamento e cancelar a operação.
+
+```bash
+# credenciais do GitHub Packages (veja "Configuração Android")
+export GITHUB_USER=seu_usuario_github
+export GITHUB_PAT=ghp_seu_token
+
+cd example
+flutter pub get
+flutter run --flavor paxA910   # ou gertecGpos720 / tectoyT4
 ```
 
-## 🧪 Testes
+Rode num terminal SmartPOS compatível; em emulador o SDK não encontra o hardware de pagamento.
 
-Testes Dart (canal mockado, incluindo o bloqueio por `LICENCE_ERROR`):
+## Testes
+
+Testes Dart (canal mockado; cobrem todos os métodos, argumentos, retorno `false` em erro e os callbacks):
 
 ```bash
 flutter test
 ```
 
-Testes JVM da validação de licença no nativo (`android/src/test/kotlin`), pelo projeto de exemplo:
+Testes JVM do nativo (`android/src/test/kotlin`, roteamento do canal para as operações), pelo projeto de exemplo. Precisam das credenciais do GitHub Packages, porque o módulo depende do SDK Zoop:
 
 ```bash
-cd example/android
+cd example
+flutter build apk --config-only   # gera a configuração Gradle do example
+cd android
 ./gradlew :zoop_payment_tech:testPaxA910DebugUnitTest
 ```
 
-Esse comando precisa das credenciais do GitHub Packages da Zoop (`GITHUB_USER`/`GITHUB_PAT`), porque o módulo depende do SDK. As classes testadas (`LicenceConfig`, `LicenceRules`, `LicenceValidator`, `CheckLicenceEntity`, `LicenceResult`) não dependem do Android nem do SDK Zoop e também podem ser compiladas e testadas num projeto Kotlin/JVM comum com `org.json:json` e JUnit 4.
+## Migração da 1.x para a 2.0
 
-## 🔐 Licença
+A 2.0.0 torna o plugin open source (MIT) e **remove toda a validação de licença e cobrança**. Não há mais chamadas ao servidor da JY Labtech.
 
-Este plugin é protegido por uma licença restritiva que proíbe modificações, uso indevido e venda sem autorização expressa.
+O que mudou:
 
-**⚠️ IMPORTANTE**:
+- Removidas as chaves `licenceKey`/`licenceInternalKey` lidas do `local.properties` e as variáveis `LICENCE_KEY`/`LICENCE_INTERNAL_KEY`; o `BuildConfig` do plugin não tem mais `LICENCE_KEY`/`LICENCE_INTERNAL_KEY`.
+- Removida a constante Dart `licenceCheck` e a biblioteca `src/licence/` (`CHANNEL_NAME` e `USER_REFERENCE` continuam exportados, agora em `src/constants/`).
+- Removido o erro `LICENCE_ERROR` e a mensagem `"Sua licença não foi ativada. ..."`: as operações vão direto ao SDK.
+- Removida a dependência `androidx.security:security-crypto` e o cache de licença no aparelho.
 
-- **Modificações são proibidas** sem autorização prévia e por escrito
-- **Venda e comercialização são proibidas** sem autorização expressa
-- **Uso pessoal e interno** é permitido
-- **Distribuição** é permitida apenas com a licença completa incluída
+Antes (1.x), `android/local.properties` do app:
 
-Para solicitar permissões especiais (modificações, uso comercial, etc.), entre em contato através do GitHub: https://github.com/JY-Labtech
+```properties
+GITHUB_USER=seu_usuario_github
+GITHUB_PAT=ghp_seu_token
+licenceKey=SUA_CHAVE_DE_LICENCA
+licenceInternalKey=...
+```
 
-Leia o arquivo [LICENSE](LICENSE) para mais detalhes sobre os termos completos da licença.
+```dart
+import 'package:zoop_payment_tech/zoop_payment_tech.dart';
 
-Este plugin é um wrapper não oficial do SDK Zoop SmartPOS. Certifique-se de seguir os termos de uso do SDK oficial da Zoop ao utilizar este plugin.
+final url = licenceCheck; // constante de licença
+final ok = await payment.creditPayment(amount: 1000);
+// ok == false e onError("Sua licença não foi ativada. ...") sem licença válida
+```
 
-O sistema de licenças integrado valida automaticamente se o plugin está autorizado para uso antes de permitir operações de pagamento.
+Depois (2.0), sem nada de licença:
 
-## 📞 Suporte
+```properties
+# ~/.gradle/gradle.properties (ou variáveis de ambiente)
+GITHUB_USER=seu_usuario_github
+GITHUB_PAT=ghp_seu_token
+```
 
-Para questões relacionadas ao SDK Zoop, consulte a documentação oficial da Zoop.
+```dart
+import 'package:zoop_payment_tech/zoop_payment_tech.dart';
 
-Para questões específicas sobre este plugin, verifique os issues do repositório ou entre em contato com a equipe de desenvolvimento.
+final ok = await payment.creditPayment(amount: 1000); // vai direto ao SDK Zoop
+```
 
----
+Passos: apague `licenceKey`/`licenceInternalKey` do `local.properties` e `LICENCE_KEY`/`LICENCE_INTERNAL_KEY` do CI, remova usos de `licenceCheck` e de imports `package:zoop_payment_tech/src/licence/...`, e faça `flutter clean`. O restante da API Dart não mudou.
 
-<div align="left">
-  <table>
-  <tr>
-    <td align="center"><a href="https://github.com/JY-Labtech"><img src="https://avatars.githubusercontent.com/u/185066406?s=200&v=4" width="100px;" alt=""/><br /><sub><b>JY Labtech</b></sub></a><br /> <a href="https://github.com/JY-Labtech" title="Autor"></a></td>
-  </tr>
+## Contribuindo
 
-</table>
+Issues e pull requests são bem-vindos em https://github.com/JY-Labtech/zoop_payment_tech/issues.
 
-</div>
+1. Faça um fork e crie um branch.
+2. Rode `flutter analyze` e `flutter test` (e os testes nativos, se tiver acesso ao GitHub Packages da Zoop).
+3. Descreva no PR o terminal em que testou.
 
----
+Nunca inclua tokens (`GITHUB_PAT`) ou credenciais Zoop em commits.
+
+## Licença
+
+Distribuído sob a licença [MIT](LICENSE). O SDK Zoop SmartPOS **não** faz parte deste pacote e segue os termos da Zoop.
+
+## Créditos
+
+Desenvolvido por [JY Labtech](https://jylabtech.com.br) ([GitHub](https://github.com/JY-Labtech)).

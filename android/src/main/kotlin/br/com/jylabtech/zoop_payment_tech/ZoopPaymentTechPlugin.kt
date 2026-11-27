@@ -4,8 +4,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import br.com.jylabtech.zoop_payment_tech.BuildConfig
-import br.com.jylabtech.zoop_payment_tech.licence.CheckLicenceTech
 import com.zoop.pos.Zoop
 import com.zoop.pos.collection.UserInput
 import com.zoop.pos.collection.UserSelection
@@ -32,8 +30,6 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 class ZoopPaymentTechPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var channel: MethodChannel? = null
@@ -43,134 +39,39 @@ class ZoopPaymentTechPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var loginRequest: Request? = null
     private var pixRequest: Request? = null
     private var voidTransaction: UserSelection<VoidTransaction>? = null
-    private var checkLicenceTech: CheckLicenceTech? = null
-    
+
     private val TAG = "ZoopPaymentTechPlugin"
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
-    // Thread única: mantém a ordem das chamadas e tira a validação de rede da main thread
-    private val licenceExecutor: ExecutorService by lazy { Executors.newSingleThreadExecutor() }
-
-    companion object {
-        /** Operações que só executam com licença válida. */
-        private val GATED_METHODS = setOf(
-            "initialize",
-            "login",
-            "checkZoopKey",
-            "creditPayment",
-            "pixPayment",
-            "voidTransaction",
-            "selectVoidTransaction"
-        )
-    }
+    private val dispatcher = ZoopMethodDispatcher(object : ZoopOperations {
+        override fun platformVersion() = "Android ${android.os.Build.VERSION.RELEASE}"
+        override fun initialize(call: MethodCall, result: MethodChannel.Result) = handleInitialize(call, result)
+        override fun login(call: MethodCall, result: MethodChannel.Result) = handleLogin(call, result)
+        override fun checkZoopKey(result: MethodChannel.Result) = handleCheckZoopKey(result)
+        override fun creditPayment(call: MethodCall, result: MethodChannel.Result) = handleCreditPayment(call, result)
+        override fun pixPayment(call: MethodCall, result: MethodChannel.Result) = handlePixPayment(call, result)
+        override fun voidTransaction(result: MethodChannel.Result) = handleVoidTransaction(result)
+        override fun selectVoidTransaction(call: MethodCall, result: MethodChannel.Result) =
+            handleSelectVoidTransaction(call, result)
+        override fun cancelOperation(result: MethodChannel.Result) = handleCancelOperation(result)
+        override fun reportError(message: String, error: Exception) {
+            Log.e(TAG, message, error)
+            sendError(message)
+        }
+    })
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "zoop_payment_tech")
         context = flutterPluginBinding.applicationContext
         channel?.setMethodCallHandler(this)
-        
-        // Initialize CheckLicenceTech
-        context?.let { ctx ->
-            checkLicenceTech = CheckLicenceTech(ctx)
-        }
-        
+
         // Initialize Zoop SDK
         context?.let { initializeZoop(it) }
     }
 
+    // As chamadas chegam na main thread e vão direto para o SDK da Zoop (ver ZoopMethodDispatcher).
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            // Métodos que não executam operação de negócio: não passam pelo gate de licença
-            when (call.method) {
-                "getPlatformVersion" -> {
-                    result.success("Android ${android.os.Build.VERSION.RELEASE}")
-                    return
-                }
-                // Cancelar uma operação em andamento nunca é bloqueado
-                "cancelOperation" -> {
-                    handleCancelOperation(result)
-                    return
-                }
-            }
-
-            if (call.method !in GATED_METHODS) {
-                result.notImplemented()
-                return
-            }
-
-            // Gate por operação: valida a licença (servidor/cache, ver LicenceValidator) fora da main thread
-            // e só então executa a operação na main thread. Licença inválida => LICENCE_ERROR e
-            // o SDK da Zoop não é chamado.
-            licenceExecutor.execute {
-                val licenceError = checkLicenceError()
-                mainHandler.post {
-                    if (licenceError != null) {
-                        val errorMsg = "Sua licença não foi ativada. $licenceError"
-                        Log.e(TAG, errorMsg)
-                        sendError(errorMsg)
-                        result.error("LICENCE_ERROR", errorMsg, null)
-                    } else {
-                        dispatchMethod(call, result)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in method call ${call.method}", e)
-            sendError("Erro: ${e.message}")
-            result.error("ERROR", e.message, null)
-        }
-    }
-
-    private fun dispatchMethod(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            when (call.method) {
-                "initialize" -> handleInitialize(call, result)
-                "login" -> handleLogin(call, result)
-                "checkZoopKey" -> handleCheckZoopKey(result)
-                "creditPayment" -> handleCreditPayment(call, result)
-                "pixPayment" -> handlePixPayment(call, result)
-                "voidTransaction" -> handleVoidTransaction(result)
-                "selectVoidTransaction" -> handleSelectVoidTransaction(call, result)
-                else -> result.notImplemented()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in method call ${call.method}", e)
-            sendError("Erro: ${e.message}")
-            result.error("ERROR", e.message, null)
-        }
-    }
-
-    /**
-     * Valida a licença lida do BuildConfig (local.properties/variáveis de ambiente do app).
-     * Retorna null se válida, ou a mensagem de erro. Bloqueante: chamar fora da main thread.
-     */
-    private fun checkLicenceError(): String? {
-        return try {
-            val licenceKey = BuildConfig.LICENCE_KEY
-            val licenceInternalKey = BuildConfig.LICENCE_INTERNAL_KEY
-
-            if (licenceKey.isEmpty()) {
-                Log.w(TAG, "Licença não configurada")
-                return "Licença não configurada (licenceKey vazio)"
-            }
-
-            val checker = checkLicenceTech ?: return "Plugin não inicializado"
-            val licenceResult = checker.validateLicence(licenceKey, licenceInternalKey)
-            val isValid = licenceResult.isSuccess
-
-            Log.i(TAG, "*resultLicence: $isValid")
-
-            if (isValid) {
-                null
-            } else {
-                val message = licenceResult.errorMessage ?: "Erro ao validar licença"
-                Log.e(TAG, "Erro na validação de licença: $message")
-                message
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Erro ao validar licença", e)
-            e.message ?: "Erro ao validar licença"
-        }
+        dispatcher.dispatch(call, result)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -248,7 +149,7 @@ class ZoopPaymentTechPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
 
                 override fun onSuccess(response: DashboardTokenResponse) {
-                    Log.d(TAG, "Token recebido: ${response.token}")
+                    Log.d(TAG, "Token recebido")
                     sendToken(response.token)
                 }
             })
@@ -266,16 +167,7 @@ class ZoopPaymentTechPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     Log.d(TAG, "MarketplaceId: ${response.credentials.marketplace}")
                     Log.d(TAG, "SellerId: ${response.credentials.seller}")
                     Log.d(TAG, "Terminal: ${response.credentials.terminal}")
-                    Log.d(TAG, "AccessKey: ${response.credentials.accessKey}")
                     Log.d(TAG, "SellerName: ${response.owner.name}")
-
-                    val credentialsMap = mapOf(
-                        "marketplace" to response.credentials.marketplace,
-                        "seller" to response.credentials.seller,
-                        "terminal" to response.credentials.terminal,
-                        "accessKey" to response.credentials.accessKey,
-                        "sellerName" to response.owner.name
-                    )
 
                     sendSuccess("Login realizado: ${response.owner.name}")
                     
@@ -562,32 +454,45 @@ class ZoopPaymentTechPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     // Helper methods to send callbacks to Flutter
+
+    /**
+     * Os callbacks do SDK Zoop podem chegar em threads de fundo, mas o MethodChannel só pode
+     * ser usado na main thread: todo envio ao Dart passa por aqui.
+     */
+    private fun invokeOnMain(method: String, arguments: Any?) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            channel?.invokeMethod(method, arguments)
+        } else {
+            mainHandler.post { channel?.invokeMethod(method, arguments) }
+        }
+    }
+
     private fun sendSuccess(message: String) {
-        channel?.invokeMethod("onSuccess", mapOf("message" to message))
+        invokeOnMain("onSuccess", mapOf("message" to message))
     }
 
     private fun sendError(message: String) {
-        channel?.invokeMethod("onError", mapOf("message" to message))
+        invokeOnMain("onError", mapOf("message" to message))
     }
 
     private fun sendMessage(message: String) {
-        channel?.invokeMethod("onMessage", mapOf("message" to message))
+        invokeOnMain("onMessage", mapOf("message" to message))
     }
 
     private fun sendLoading(show: Boolean) {
-        channel?.invokeMethod("onLoading", mapOf("show" to show))
+        invokeOnMain("onLoading", mapOf("show" to show))
     }
 
     private fun sendQRCode(qrCode: String) {
-        channel?.invokeMethod("onQRCode", mapOf("qrCode" to qrCode))
+        invokeOnMain("onQRCode", mapOf("qrCode" to qrCode))
     }
 
     private fun sendToken(token: String) {
-        channel?.invokeMethod("onToken", mapOf("token" to token))
+        invokeOnMain("onToken", mapOf("token" to token))
     }
 
     private fun sendVoidTransactionList(transactions: List<Map<String, Any>>) {
-        channel?.invokeMethod("onVoidTransactionList", mapOf("transactions" to transactions))
+        invokeOnMain("onVoidTransactionList", mapOf("transactions" to transactions))
     }
 }
 

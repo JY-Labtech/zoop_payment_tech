@@ -1,7 +1,15 @@
 name: zoop_payment_tech
-description: "Plugin Flutter para integração com o SDK Zoop SmartPOS. Permite realizar pagamentos, PIX, login e cancelamentos através de terminais SmartPOS da Zoop."
-version: 1.2.0
+description: "Unofficial Flutter plugin for the Zoop SmartPOS Android SDK: credit card payments with installments, PIX, terminal activation and void on PAX, Gertec and Tectoy POS."
+version: 2.0.0
 homepage: https://github.com/JY-Labtech/zoop_payment_tech
+repository: https://github.com/JY-Labtech/zoop_payment_tech
+issue_tracker: https://github.com/JY-Labtech/zoop_payment_tech/issues
+topics:
+  - payment
+  - pos
+  - android
+  - flutter-plugin
+  - brazil
 
 environment:
   sdk: ^3.9.2
